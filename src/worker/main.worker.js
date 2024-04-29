@@ -1,6 +1,12 @@
-onmessage = function(e) {
-    console.log('Message received from main script');
-    const blobs = Array.from({ length: 10 }, (_, id) => {
+/* eslint-disable no-restricted-globals */
+import {Main} from "./modules/main/main";
+
+const game = new Main()
+
+self.onmessage = function(e) {
+    console.log('Message received from main script', e);
+    game.eventHandler.processEvent(e);
+    /*const blobs = Array.from({ length: 10 }, (_, id) => {
         const angle = Math.random() * 2 * Math.PI; // Random angle in radians
         const speed = 0.2 + 0.2*Math.random();
         return {
@@ -26,5 +32,5 @@ onmessage = function(e) {
         setTimeout(updatePositions, 1000 / 60); // update at ~60 fps
     }
 
-    updatePositions();
+    updatePositions();*/
 };

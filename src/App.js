@@ -3,6 +3,9 @@ import './App.css';
 import { useEffect, useState } from "react";
 import GameCanvas from "./pages/map/map-canvas";
 import WorkerContext from "./context/worker-context";
+import * as WorkerModule from './worker/main.worker.js';
+import {MainWindow} from "./pages/main-window";
+const Worker = WorkerModule.default;
 
 function App() {
 
@@ -10,9 +13,8 @@ function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const newWorker = new Worker('/worker.js', { type: 'module' });
+    const newWorker = new Worker();
     setWorker(newWorker);
-    newWorker.postMessage('Init');
     setLoading(false);
     return () => newWorker.terminate();
   }, []);
@@ -24,10 +26,7 @@ function App() {
   return (
       <WorkerContext.Provider value={worker}>
         <div className="App">
-          <header className="App-header">
-            <img src={logo} className="App-logo" alt="logo" />
-            <GameCanvas />
-          </header>
+            <MainWindow />
         </div>
       </WorkerContext.Provider>
   );
