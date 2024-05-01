@@ -43,8 +43,10 @@ export class Tree extends GameModule {
 
     displayTrees() {
         const trees = Object.values(this.trees);
-        const treesArr = new MapViewport().filterVisible(trees);
+        const viewPort = new MapViewport();
+        const treesArr = viewPort.filterVisible(trees);
 
+        // if(!)
         this.eventHandler.sendData('tree-coordinates', { trees: treesArr.map(tree => ({
                 ...tree,
                 displayX: tree.x - this.map.width / 2,

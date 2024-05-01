@@ -39,7 +39,7 @@ export class MapViewport extends GameModule {
         const cameraTarget = this.position.target;
         return objects.filter(object => {
             const dx = object.x - cameraPosition.x - this.map.width / 2;
-            const dy = object.y - cameraPosition.y - this.map.height / 2;
+            const dy = object.y - cameraPosition.z - this.map.height / 2;
             const distance = Math.sqrt(dx * dx + dy * dy);
             return distance <= MAX_DISTANCE;
         })

@@ -1,5 +1,6 @@
 import {GameModule} from "../../shared/game-module";
 import {Grid} from "./grid";
+import {MapViewport} from "./map-viewport";
 
 export class Food extends GameModule {
 
@@ -42,13 +43,6 @@ export class Food extends GameModule {
             new Grid().addFood(food);
         })
 
-        this.eventHandler.sendData('food-coordinates', { food: Object.values(this.food).map(food => ({
-                ...food,
-                displayX: food.x - this.map.width / 2,
-                displayY: food.y - this.map.height / 2,
-                angle: food.angle,
-            }))
-        })
     }
 
     foodDrain(id, reason) {
@@ -82,6 +76,23 @@ export class Food extends GameModule {
             this.eventHandler.sendData('selected-food-data', this.dataToDisplay(this.selectedFood));
         }
 
+        this.displayFood();
+
+    }
+
+    displayFood() {
+        const foods = Object.values(this.food);
+        const viewPort = new MapViewport();
+        const foodArr = viewPort.filterVisible(foods);
+
+        // if(!)
+        this.eventHandler.sendData('food-coordinates', { food: foodArr.map(food => ({
+                ...food,
+                displayX: food.x - this.map.width / 2,
+                displayY: food.y - this.map.height / 2,
+                angle: food.angle,
+            }))
+        })
     }
 
     dataToDisplay(food) {

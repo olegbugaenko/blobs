@@ -17,14 +17,16 @@ function GameCanvas() {
     const blobsRef = useRef({});
     const blobModelRef = useRef(null);
     const [food, setFood] = useState([]);
-    const foodRef = useRef({});
+    const foodRef = useRef({ instances: {} });
     const [trees, setTrees] = useState([]);
-    const treeRef = useRef({});
+    const treeRef = useRef({ models: {}, instances: {}});
     const { onMessage, sendData } = useWorkerClient(worker);
     const mouse = new THREE.Vector2();
     const mixers = useRef(new Map());
     const clock = new THREE.Clock();
     const currentBlobIDs = new Set();
+    const currentTreeIDs = new Set();
+    const currentFoodIDs = new Set();
 
     const [zoom, setZoom] = useState(2);
     const [cameraSettings, setCameraSettings] = useState({
@@ -214,33 +216,6 @@ function GameCanvas() {
             setSelectedBlobData(payload);
         })
 
-        function cloneSkinnedMesh(original) {
-            const cloned = original.clone(true);
-
-            cloned.traverse(function (node) {
-                if (node.isSkinnedMesh) {
-                    const clonedMesh = node;
-                    const skeleton = clonedMesh.skeleton;
-                    const newBones = [];
-
-                    // Clone bones
-                    for (const bone of skeleton.bones) {
-                        const clonedBone = bone.clone(true);
-                        newBones.push(clonedBone);
-                    }
-
-                    // Create a new skeleton with the cloned bones
-                    const newSkeleton = new THREE.Skeleton(newBones);
-                    clonedMesh.add(...newBones);
-                    clonedMesh.bind(newSkeleton, clonedMesh.bindMatrix);
-                }
-            });
-
-            return cloned;
-        }
-
-
-
 
         function preloadAssets() {
             const loader = new GLTFLoader();
@@ -268,7 +243,7 @@ function GameCanvas() {
             });
 
             loader.load('models/tree-v2.glb', function (gltf) {
-                treeRef.current.model = gltf.scene;
+                treeRef.current.models.model = gltf.scene;
                 console.log('Tree model loaded');
                 assetLoaded(); // Mark this asset as loaded
             }, undefined, function (error) {
@@ -276,7 +251,7 @@ function GameCanvas() {
             });
 
             loader.load('models/tree-v3.glb', function (gltf) {
-                treeRef.current.modelv2 = gltf.scene;
+                treeRef.current.models.modelv2 = gltf.scene;
                 console.log('Tree v2 model loaded');
                 assetLoaded(); // Mark this asset as loaded
             }, undefined, function (error) {
@@ -284,7 +259,7 @@ function GameCanvas() {
             });
 
             loader.load('models/tree-v4.glb', function (gltf) {
-                treeRef.current.modelv3 = gltf.scene;
+                treeRef.current.models.modelv3 = gltf.scene;
                 console.log('Tree v3 model loaded', treeRef.current);
                 assetLoaded(); // Mark this asset as loaded
             }, undefined, function (error) {
@@ -344,7 +319,7 @@ function GameCanvas() {
 
 
         onMessage('blobs-coordinates', payload => {
-            console.log('blobsReceived: ', payload.blobs);
+            // console.log('blobsReceived: ', payload.blobs);
             const newBlobIDs = new Set();
             payload.blobs.forEach(blob => {
                 newBlobIDs.add(blob.id);
@@ -439,8 +414,10 @@ function GameCanvas() {
         onMessage('food-coordinates', payload => {
             const receivedFood = payload.food;
             console.log('received food: ', receivedFood);
+            const newFoodIDs = new Set();
             receivedFood.forEach(foodItem => {
-                if (!foodRef.current[foodItem.id]) {
+                newFoodIDs.add(foodItem.id);
+                if (!foodRef.current.instances[foodItem.id]) {
                     // If an instance for this ID doesn't exist, create it
                     const foodMesh = foodRef.current.model.clone();  // Clone the model
 
@@ -455,18 +432,31 @@ function GameCanvas() {
                     scene.add(foodMesh);
 
                     // Store the mesh in ref for potential updates
-                    foodRef.current[foodItem.id] = foodMesh;
-                } else {
+                    foodRef.current.instances[foodItem.id] = foodMesh;
+                } /*else {
                     // Update existing mesh position and rotation if it already exists
-                    const foodMesh = foodRef.current[foodItem.id];
+                    const foodMesh = foodRef.current.instances[foodItem.id];
                     foodMesh.position.set(foodItem.displayX, 0.1, foodItem.displayY);
                     foodMesh.rotation.y = foodItem.angle;
-                }
+                }*/
             });
+
+            currentFoodIDs.forEach(id => {
+                if (!newFoodIDs.has(id)) {
+                    const foodMesh = foodRef.current.instances[id];
+                    if (foodMesh) {
+                        disposeHierarchy(foodMesh, true);
+                        delete foodRef.current.instances[id];
+                    }
+                }
+            })
+
+            currentFoodIDs.clear();
+            newFoodIDs.forEach(id => currentFoodIDs.add(id));
             setFood(receivedFood);
         })
 
-        onMessage('tree-coordinates', payload => {
+        /*onMessage('tree-coordinates', payload => {
             const receivedTrees = payload.trees;
             console.log('received trees: ', receivedTrees);
             receivedTrees.forEach(treeItem => {
@@ -502,7 +492,55 @@ function GameCanvas() {
                 }
             });
             setTrees(receivedTrees);
-        })
+        })*/
+
+        onMessage('tree-coordinates', payload => {
+            console.log('received-trees: ', payload.trees.length);
+
+            const newTreeIDs = new Set();
+            // Process received trees and update or create new ones
+            payload.trees.forEach(treeItem => {
+                newTreeIDs.add(treeItem.id);
+                let treeMesh = treeRef.current.instances[treeItem.id];
+                if (!treeMesh) {
+                    // Create new tree mesh
+                    if(treeItem.type === 'v0') {
+                        treeMesh = treeRef.current.models.model.clone();
+                    } else if(treeItem.type === 'v1') {
+                        treeMesh = treeRef.current.models.modelv2.clone();
+                    } else if(treeItem.type === 'v2') {
+                        treeMesh = treeRef.current.models.modelv3.clone();
+                    }
+
+                    treeMesh.position.set(treeItem.displayX, 0, treeItem.displayY);
+                    treeMesh.rotation.y = treeItem.angle;
+                    treeMesh.userData = { id: treeItem.id };
+
+                    scene.add(treeMesh);
+                    treeRef.current.instances[treeItem.id] = treeMesh;
+                } /*else {
+                    // Update existing tree
+                    treeMesh.position.set(treeItem.displayX, 0, treeItem.displayY);
+                    treeMesh.rotation.y = treeItem.angle;
+                }*/
+            });
+
+            currentTreeIDs.forEach(id => {
+                if (!newTreeIDs.has(id)) {
+                    const treeMesh = treeRef.current.instances[id];
+                    if (treeMesh) {
+                        disposeHierarchy(treeMesh, true);
+                        delete treeRef.current.instances[id];
+                    }
+                }
+            })
+
+            currentTreeIDs.clear();
+            newTreeIDs.forEach(id => currentTreeIDs.add(id));
+
+            setTrees(payload.trees);
+        });
+
 
 
 
@@ -634,24 +672,32 @@ function GameCanvas() {
     const moveXZ = useCallback((dX, dZ) => {
         if (!cameraRef.current) return;
 
-        // Calculate the current phi
-        const phi = Math.atan2(cameraRef.current.position.z - cameraSettings.target.z, cameraRef.current.position.x - cameraSettings.target.x);
+        // Ensure we are calculating the angle of rotation around the Y-axis
+        const phi = Math.atan2(
+            cameraSettingsRef.current.position.z - cameraSettingsRef.current.target.z,
+            cameraSettingsRef.current.position.x - cameraSettingsRef.current.target.x
+        );
 
-        // Adjust sin and cos multipliers to calculate new positions
-        const drX = (-dZ * Math.cos(phi)) + (dX * Math.sin(phi));
-        const drZ = (dX * Math.cos(phi)) - (-dZ * Math.sin(phi));
-        const newY = cameraSettings.position.y; // Maintain the current y position
+        console.log("Angle Phi in degrees:",
+            phi * 180 / Math.PI,
+            cameraSettingsRef.current.position.z - cameraSettingsRef.current.target.z,
+            cameraSettingsRef.current.position.x - cameraSettingsRef.current.target.x
+        );
 
-        // Update camera position and target in cameraSettings state
+        // Calculate the new positions based on the camera's orientation
+        /*const drX = dX * Math.cos(phi) - dZ * Math.sin(phi);
+        const drZ = dX * Math.sin(phi) + dZ * Math.cos(phi);*/
+        const drX = dX * Math.sin(phi) + dZ * Math.cos(phi);
+        const drZ = dX * Math.cos(phi) + dZ * Math.sin(phi);
+
+        console.log("dX, dZ:", dX, dZ);
+        console.log("drX, drZ:", drX, drZ);
+
+        // Apply the calculated positional changes to the camera settings
         setCameraSettings(prev => ({
             position: { ...prev.position, x: prev.position.x + drX, z: prev.position.z + drZ },
-            target: { ...prev.target, x: prev.target.x + drX, z: prev.target.z + drZ } // Optionally, update target as well
+            target: { ...prev.target, x: prev.target.x + drX, z: prev.target.z + drZ }
         }));
-
-        // sendData('camera-position', cameraSettingsRef.current);
-        // Update camera position and lookAt
-        // cameraRef.current.position.set(newX, newY, newZ);
-        // cameraRef.current.lookAt(cameraSettings.target);
     }, [cameraSettings.target, cameraSettings.position]);
 
 
