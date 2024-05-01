@@ -13,6 +13,7 @@ export const BlobDetails = ({onFollow, isFollowing, isFPV, onSetFPV, ...props}) 
         <p>Position: {props.displayX}:{props.displayY}</p>
         <p>Cell: {props.cellX}:{props.cellY}</p>
         <p>Activity: {props.action}</p>
+        <p>AnimD: {props.animation}</p>
         <div className={'buttons flex'}>
             <button onClick={onFollowClick}>{isFollowing ? 'Stop Following' : 'Follow'}</button>
             <button onClick={onSetFPV}>{isFPV ? 'Stop 1st person' : 'Start 1st person'}</button>

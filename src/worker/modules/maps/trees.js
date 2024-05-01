@@ -1,5 +1,6 @@
 import {GameModule} from "../../shared/game-module";
 import {Grid} from "./grid";
+import {MapViewport} from "./map-viewport";
 
 export class Tree extends GameModule {
 
@@ -34,8 +35,17 @@ export class Tree extends GameModule {
         Object.values(this.trees).forEach(tree => {
             new Grid().addTree(tree);
         })
+    }
 
-        this.eventHandler.sendData('tree-coordinates', { trees: Object.values(this.trees).map(tree => ({
+    tick() {
+        this.displayTrees();
+    }
+
+    displayTrees() {
+        const trees = Object.values(this.trees);
+        const treesArr = new MapViewport().filterVisible(trees);
+
+        this.eventHandler.sendData('tree-coordinates', { trees: treesArr.map(tree => ({
                 ...tree,
                 displayX: tree.x - this.map.width / 2,
                 displayY: tree.y - this.map.height / 2,

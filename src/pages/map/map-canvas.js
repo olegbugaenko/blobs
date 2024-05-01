@@ -5,6 +5,7 @@ import {useWorkerClient} from "../../general/client";
 import {BlobDetails} from "./blob-details";
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
+import {disposeHierarchy} from "../../helpers/web-gl.helper";
 
 
 function GameCanvas() {
@@ -23,6 +24,7 @@ function GameCanvas() {
     const mouse = new THREE.Vector2();
     const mixers = useRef(new Map());
     const clock = new THREE.Clock();
+    const currentBlobIDs = new Set();
 
     const [zoom, setZoom] = useState(2);
     const [cameraSettings, setCameraSettings] = useState({
@@ -70,6 +72,14 @@ function GameCanvas() {
         rendererRef.current.setSize(window.innerWidth, window.innerHeight);
     }
 
+    function getParentData(o) {
+        let a = o;
+        while (a.parent && !a.userData?.id) {
+            a = a.parent;
+        }
+        return a;
+    }
+
     function onDocumentMouseDown( event ) {
         if(event.target.tagName.toLowerCase() !== 'canvas') {
             return;
@@ -83,8 +93,9 @@ function GameCanvas() {
         const intersects = raycaster.intersectObjects(Object.values(blobsRef.current));
 
         if (intersects.length > 0) {
-            console.log("You clicked on a blob!", intersects[0].object);
-            setSelectedBlob(intersects[0].object.userData.id);
+            const intr = getParentData(intersects[0].object)
+            console.log("You clicked on a blob!", intr, intersects[0].object);
+            setSelectedBlob(intr.userData.id);
             // Example: Change color of the first intersected object
             // intersects[0].object.material.color.setHex(Math.random() * 0xffffff);
         } else {
@@ -105,6 +116,7 @@ function GameCanvas() {
 
     useEffect(() => {
         cameraSettingsRef.current = cameraSettings;
+        sendData('camera-position', cameraSettingsRef.current);
     }, [cameraSettings]);
 
     const handleMouseMove = useCallback((event) => {
@@ -142,7 +154,7 @@ function GameCanvas() {
         } else if (event.buttons === 1) { // left button
             const deltaX = Math.sign(event.movementX);
             const deltaY = Math.sign(event.movementY);
-            console.log('deltas: ', deltaX, deltaY);
+            // console.log('deltas: ', deltaX, deltaY);
             moveXZ(deltaX, deltaY);
             // moveCameraForward(deltaY);
         }
@@ -166,7 +178,7 @@ function GameCanvas() {
         const scene = new THREE.Scene();
         const aspect = window.innerWidth / window.innerHeight;
         // const camera = new THREE.OrthographicCamera(-aspect * 10, aspect * 10, 10, -10, 1, 1000);
-        const camera = new THREE.PerspectiveCamera(10, aspect, 0.1, 2000);
+        const camera = new THREE.PerspectiveCamera(10, aspect, 0.1, 500);
         cameraRef.current = camera;
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -242,7 +254,7 @@ function GameCanvas() {
                 if (loadedAssets === assetsToLoad) {
                     // All assets are loaded
                     console.log('All assets loaded');
-                    sendData('init-map', { width: 1000, height: 1000 })
+                    sendData('init-map', { width: 4000, height: 4000 })
                 }
             };
 
@@ -281,7 +293,7 @@ function GameCanvas() {
 
 
             // Load texture
-            loader.load('models/blob-v4.glb', function (gltf) {
+            loader.load('models/blob-v11.glb', function (gltf) {
 
                 gltf.scene.traverse(function(node) {
                     if (node.isMesh) {
@@ -294,7 +306,7 @@ function GameCanvas() {
                         console.log("Bone found", node);
                     }
                 });
-                gltf.scene.scale.set(1, 1, 1);  // Adjust as necessary
+                gltf.scene.scale.set(0.5, 0.5, 0.5);  // Adjust as necessary
                 gltf.scene.position.set(100, 0, 10);
 
                 blobModelRef.current = {
@@ -332,12 +344,16 @@ function GameCanvas() {
 
 
         onMessage('blobs-coordinates', payload => {
+            console.log('blobsReceived: ', payload.blobs);
+            const newBlobIDs = new Set();
             payload.blobs.forEach(blob => {
+                newBlobIDs.add(blob.id);
                 let blobMesh = blobsRef.current[blob.id];
                 let mixer = mixers.current.get(blob.id);
 
                 if (!blobMesh) {
                     blobMesh = SkeletonUtils.clone(blobModelRef.current.scene);
+                    blobMesh.frustumCulled = true;
                     blobMesh.userData = {
                         id: blob.id,
                     }
@@ -347,69 +363,69 @@ function GameCanvas() {
                     mixer = new THREE.AnimationMixer(blobMesh);
                     mixers.current.set(blob.id, mixer);
 
-                    const initialAction = mixer.clipAction(blobModelRef.current.animations[0]); // Assuming the first is "Moving"
-                    initialAction.play();
-                    console.log('currList: ', blobsRef.current);
+                    // const initialAction = mixer.clipAction(blobModelRef.current.animations[0]); // Assuming the first is "Moving"
+                    // initialAction.play();
+                    // console.log('currList: ', blobsRef.current);
                 }
 
                 blobMesh.position.set(blob.displayX, 0.4, blob.displayY);
                 blobMesh.rotation.y = - Math.PI / 2 - blob.angle;
 
-                /*if (blob.animation) {
-                    const action = mixer.clipAction(THREE.AnimationClip.findByName(blobModelRef.current.animations, blob.animation));
-                    action.reset().play();
-                }*/
+                if (blob.animation !== blobMesh.userData.prevAnimation) {
+                    if(!blob.animation) {
+                        mixer.stopAllAction();
+                    } else {
+                        const action = mixer.clipAction(THREE.AnimationClip.findByName(blobModelRef.current.animations, blob.animation));
+                        if(!action) {
+                            console.warn('Not found animation: ', blob.animation, blobModelRef.current.animations)
+                        } else {
+                            mixer.stopAllAction();
+                            action.reset().play();
+                        }
+                    }
+
+                }
+
+                blobMesh.userData.prevAnimation = blob.animation;
+                blobMesh.userData.x = blob.displayX;
+                blobMesh.userData.y = blob.displayY;
+                blobMesh.userData.angle = blob.angle;
             });
+
+            // Now, handle removal of blobs not in the new payload
+            currentBlobIDs.forEach(id => {
+                if (!newBlobIDs.has(id)) {
+                    // Blob is not in the new payload, remove it
+                    const blobMesh = blobsRef.current[id];
+                    const mixer = mixers.current.get(id);
+                    if (mixer) {
+                        mixer.stopAllAction();
+                        mixer.uncacheRoot(blobMesh); // Optionally clear cached actions
+                        mixers.current.delete(id);
+                    }
+                    if(blobMesh) {
+                        scene.remove(blobMesh);
+                        disposeHierarchy(blobMesh);
+                        delete blobsRef.current[id];
+                    }
+
+
+                }
+            });
+
+            // Update the set of current blob IDs
+            currentBlobIDs.clear();
+            newBlobIDs.forEach(id => currentBlobIDs.add(id));
+
             setBlobs(payload.blobs);
-            /*const receivedBlobs = payload.blobs;
-            receivedBlobs.forEach(blob => {
 
-                let mixer;
-                if (!blobsRef.current[blob.id]) {
-                    const blobMesh = blobModelRef.current.scene.clone();
-                    mixer = new THREE.AnimationMixer(blobMesh);
-                    mixers.current.set(blob.id, mixer);
-
-                    const initialAction = mixer.clipAction(blobModelRef.current.animations[0]); // Assuming the first animation is "Moving"
-                    initialAction.play();
-
-                    blobMesh.position.set(blob.displayX, 0.4, blob.displayY);
-                    blobMesh.rotation.y = -blob.angle;
-                    scene.add(blobMesh);
-
-                    blobsRef.current[blob.id] = blobMesh;
-                } else {
-                    const blobMesh = blobsRef.current[blob.id];
-                    blobMesh.position.set(blob.displayX, 0.4, blob.displayY);
-                    blobMesh.rotation.y = -blob.angle;
-                    mixer = mixers.current.get(blob.id);
-                }
-
-                /!*if(blob.id === 1) {
-                    console.log('animations: ', blobModelRef.current.animations);
-                }*!/
-
-                // Update the animation if there's new data
-                if (blob.animation) {
-                    const action = mixer.clipAction(THREE.AnimationClip.findByName(blobModelRef.current.animations, blob.animation));
-                    action.reset().play();
-                }
-
-                /!*blobsRef.current[blob.id].rotation.y = - blob.angle;
-                blobsRef.current[blob.id].position.set(blob.displayX, 0.4, blob.displayY, 1);*!/
-                blobsRef.current[blob.id].userData = {
-                    id: blob.id,
-                    angle: blob.angle
-                }
-            });
-            setBlobs(receivedBlobs);*/
         })
 
         onMessage('delete-blob', payload => {
             console.log('Blob '+payload.id+' died');
             if (blobsRef.current[payload.id]) {
                 const mesh = blobsRef.current[payload.id];
-                console.log('Dying Mesh: ', mesh);
+                // console.log('Dying Mesh: ', mesh);
                 const mixer = mixers.current.get(payload.id);
                 mixer.actions?.forEach(action => mixer.uncacheAction(action));
                 scene.remove(mesh);
@@ -590,16 +606,29 @@ function GameCanvas() {
         // console.log('blob: ', blob);
         setCameraSettings({
             position: {
-                x: blob.position.x,
-                y: 1,
-                z: blob.position.z
-            },
-            target: {
                 x: blob.position.x + Math.cos(blob.userData.angle),
                 y: 1,
                 z: blob.position.z + Math.sin(blob.userData.angle)
+            },
+            target: {
+                x: blob.position.x + 2*Math.cos(blob.userData.angle),
+                y: 1,
+                z: blob.position.z + 2*Math.sin(blob.userData.angle)
             }
         })
+
+       /* console.log('chngCam: ', {
+            position: {
+                x: blob.position.x + Math.cos(blob.userData.angle),
+                y: 2,
+                z: blob.position.z + Math.sin(blob.userData.angle)
+            },
+            target: {
+                x: blob.position.x + 2*Math.cos(blob.userData.angle),
+                y: 1.5,
+                z: blob.position.z + 2*Math.sin(blob.userData.angle)
+            }
+        });*/
     }
 
     const moveXZ = useCallback((dX, dZ) => {
@@ -618,6 +647,8 @@ function GameCanvas() {
             position: { ...prev.position, x: prev.position.x + drX, z: prev.position.z + drZ },
             target: { ...prev.target, x: prev.target.x + drX, z: prev.target.z + drZ } // Optionally, update target as well
         }));
+
+        // sendData('camera-position', cameraSettingsRef.current);
         // Update camera position and lookAt
         // cameraRef.current.position.set(newX, newY, newZ);
         // cameraRef.current.lookAt(cameraSettings.target);
