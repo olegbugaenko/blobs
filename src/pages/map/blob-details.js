@@ -11,6 +11,7 @@ export const BlobDetails = ({onFollow, isFollowing, isFPV, onSetFPV, ...props}) 
         <p>Age: {props.age}</p>
         <p>Hunger: {props.foodStat}</p>
         <p>Position: {props.displayX}:{props.displayY}</p>
+        <p>Speed: {props.speed} ({props.dx}; {props.dy})</p>
         <p>Cell: {props.cellX}:{props.cellY}</p>
         <p>Activity: {props.action}</p>
         <p>AnimD: {props.animation}</p>

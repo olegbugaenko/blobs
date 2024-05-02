@@ -34,7 +34,7 @@ body * {
 
 .blob-window {
   position: fixed;
-  top: 45px;
+  top: 100px;
   right: 5px;
   width: 200px;
 }

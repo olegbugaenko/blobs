@@ -15,6 +15,9 @@ export class Main extends GameModule {
             setInterval(() => {
                 this.tick.apply(this, [1/60]);
             }, 1000 / 60);
+            setInterval(() => {
+                this.process.apply(this, [0.5]);
+            }, 500);
         })
 
         Main.instance = this;
@@ -23,5 +26,10 @@ export class Main extends GameModule {
     tick(dT) {
         this.gameMap.tick(dT);
     }
+
+    process(dT) {
+        this.gameMap.process(dT);
+    }
+
 
 }

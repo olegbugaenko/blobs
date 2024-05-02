@@ -30,9 +30,9 @@ export class GameMap extends GameModule {
             this.mapViewport.init(this.map);
             console.log('Map initialized: ', payload);
             this.postMap();
-            this.blobs.seedLife(5000, this.map);
+            this.blobs.seedLife(10000, this.map);
             this.food.seedFood(mapSize / 10000, this.map);
-            this.tree.seedTree(mapSize / 5000, this.map);
+            this.tree.seedTree(mapSize / 500, this.map);
         })
         GameMap.instance = this;
     }
@@ -45,6 +45,13 @@ export class GameMap extends GameModule {
         if(this.map) {
             this.blobs.tick(dT);
             this.tree.tick(dT);
+            this.food.tick(dT);
+        }
+    }
+
+    process(dT) {
+        if(this.map) {
+            this.blobs.process(dT);
         }
     }
 

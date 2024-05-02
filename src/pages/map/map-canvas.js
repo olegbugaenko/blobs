@@ -6,6 +6,7 @@ import {BlobDetails} from "./blob-details";
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import {disposeHierarchy} from "../../helpers/web-gl.helper";
+import {debounce} from "../../helpers/utils.helper";
 
 
 function GameCanvas() {
@@ -21,6 +22,7 @@ function GameCanvas() {
     const [trees, setTrees] = useState([]);
     const treeRef = useRef({ models: {}, instances: {}});
     const { onMessage, sendData } = useWorkerClient(worker);
+    const [ totalStats, setTotalStats ] = useState({});
     const mouse = new THREE.Vector2();
     const mixers = useRef(new Map());
     const clock = new THREE.Clock();
@@ -41,6 +43,10 @@ function GameCanvas() {
 
     const [isFPV, setFPV] = useState(null);
     const isFPVRef = useRef(isFPV);
+
+    onMessage('total-stats', payload => {
+        setTotalStats(payload);
+    })
 
     useEffect(() => {
         window.addEventListener('resize', onWindowResize);
@@ -118,7 +124,8 @@ function GameCanvas() {
 
     useEffect(() => {
         cameraSettingsRef.current = cameraSettings;
-        sendData('camera-position', cameraSettingsRef.current);
+        debounce(sendData, 500)('camera-position', cameraSettingsRef.current);
+        // sendData('camera-position', cameraSettingsRef.current);
     }, [cameraSettings]);
 
     const handleMouseMove = useCallback((event) => {
@@ -229,7 +236,7 @@ function GameCanvas() {
                 if (loadedAssets === assetsToLoad) {
                     // All assets are loaded
                     console.log('All assets loaded');
-                    sendData('init-map', { width: 4000, height: 4000 })
+                    sendData('init-map', { width: 10000, height: 10000 })
                 }
             };
 
@@ -413,14 +420,14 @@ function GameCanvas() {
 
         onMessage('food-coordinates', payload => {
             const receivedFood = payload.food;
-            console.log('received food: ', receivedFood);
+            // console.log('received food: ', receivedFood);
             const newFoodIDs = new Set();
             receivedFood.forEach(foodItem => {
                 newFoodIDs.add(foodItem.id);
                 if (!foodRef.current.instances[foodItem.id]) {
                     // If an instance for this ID doesn't exist, create it
                     const foodMesh = foodRef.current.model.clone();  // Clone the model
-
+                    foodMesh.frustumCulled = true;
                     foodMesh.scale.set(0.25,0.25,0.25);
 
                     // Set the mesh properties based on incoming data
@@ -495,7 +502,7 @@ function GameCanvas() {
         })*/
 
         onMessage('tree-coordinates', payload => {
-            console.log('received-trees: ', payload.trees.length);
+            // console.log('received-trees: ', payload.trees.length);
 
             const newTreeIDs = new Set();
             // Process received trees and update or create new ones
@@ -515,6 +522,7 @@ function GameCanvas() {
                     treeMesh.position.set(treeItem.displayX, 0, treeItem.displayY);
                     treeMesh.rotation.y = treeItem.angle;
                     treeMesh.userData = { id: treeItem.id };
+                    treeMesh.frustumCulled = true;
 
                     scene.add(treeMesh);
                     treeRef.current.instances[treeItem.id] = treeMesh;
@@ -550,7 +558,7 @@ function GameCanvas() {
             const delta = clock.getDelta(); // Get the time elapsed since the last call to this function
 
             mixers.current.forEach((mixer) => {
-                mixer.update(delta); // Update each mixer with the elapsed time
+                mixer.update(delta / 2); // Update each mixer with the elapsed time
             });
 
             if (isFollowRef.current) {
@@ -766,7 +774,10 @@ function GameCanvas() {
         <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
         {selectedBlob ? (<BlobDetails {...selectedBlobData} onFollow={onFollow} isFollowing={isFollow} onSetFPV={onSetFPV} isFPV={isFPV}/>) : null}
         <div className={'box heading'}>
-            <p>Blobs Alive: {blobs.length}</p>
+            <p>Blobs Alive: {totalStats.totalBlobs}</p>
+            <p>Male: {totalStats.totalMale}</p>
+            <p>Female: {totalStats.totalFemale}</p>
+            <p>Average Age: {totalStats.averageAge}</p>
         </div>
         <div className={'boxes transparent-buttons'}>
             <button onClick={handleZoomIn}>Zoom In</button>

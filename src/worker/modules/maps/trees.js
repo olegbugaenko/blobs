@@ -47,14 +47,18 @@ export class Tree extends GameModule {
         const treesArr = viewPort.filterVisible(trees);
 
         // if(!)
-        this.eventHandler.sendData('tree-coordinates', { trees: treesArr.map(tree => ({
-                ...tree,
-                displayX: tree.x - this.map.width / 2,
-                displayY: tree.y - this.map.height / 2,
-                angle: tree.angle,
-                type: tree.type
-            }))
-        })
+        if(viewPort.shouldSend('trees')) {
+            this.eventHandler.sendData('tree-coordinates', { trees: treesArr.map(tree => ({
+                    ...tree,
+                    displayX: tree.x - this.map.width / 2,
+                    displayY: tree.y - this.map.height / 2,
+                    angle: tree.angle,
+                    type: tree.type
+                }))
+            })
+            viewPort.setStaticsSent('trees');
+        }
+
     }
 
 

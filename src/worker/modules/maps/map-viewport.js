@@ -30,6 +30,20 @@ export class MapViewport extends GameModule {
         }
     }
 
+    checkVisibility(object) {
+        const MAX_DISTANCE = 500;
+        if(!this.position || !this.map) {
+            return [];
+        }
+        const cameraPosition = this.position.position;
+        const cameraTarget = this.position.target;
+
+        const dx = object.x - cameraPosition.x - this.map.width / 2;
+        const dy = object.y - cameraPosition.z - this.map.height / 2;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        return distance <= MAX_DISTANCE;
+    }
+
     filterVisible(objects) {
         const MAX_DISTANCE = 500;
         if(!this.position || !this.map) {
