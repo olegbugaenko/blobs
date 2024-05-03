@@ -6,5 +6,6 @@ v0.0.-100500
 
 --------------------------
 v0.0.-100499
-1. Blobs breeding
+1. height maps should be initialized always first
 2. Easy animation attempt
+3. Blobs breeding

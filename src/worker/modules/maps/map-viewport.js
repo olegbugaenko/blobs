@@ -13,12 +13,25 @@ export class MapViewport extends GameModule {
         }
         super();
         MapViewport.instance = this;
+        this.isUIReady = false;
         this.eventHandler.registerHandler('camera-position', payload => {
             console.log('cam: ', payload);
             this.position = payload;
+            if(!this.isUIReady) {
+                return;
+            }
             this.staticsToSend = {
                 trees: true,
                 food: true,
+                terrain: true,
+            }
+        })
+        this.eventHandler.registerHandler('assets-loaded', payload => {
+            this.isUIReady = true;
+            this.staticsToSend = {
+                trees: true,
+                food: true,
+                terrain: true,
             }
         })
     }
@@ -44,8 +57,8 @@ export class MapViewport extends GameModule {
         return distance <= MAX_DISTANCE;
     }
 
-    filterVisible(objects) {
-        const MAX_DISTANCE = 500;
+    filterVisible(objects, thsh = 500) {
+        const MAX_DISTANCE = thsh;
         if(!this.position || !this.map) {
             return [];
         }

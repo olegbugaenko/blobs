@@ -23,12 +23,14 @@ function GameCanvas() {
     const treeRef = useRef({ models: {}, instances: {}});
     const { onMessage, sendData } = useWorkerClient(worker);
     const [ totalStats, setTotalStats ] = useState({});
+    const [ mapData, setMapData ] = useState({});
     const mouse = new THREE.Vector2();
     const mixers = useRef(new Map());
     const clock = new THREE.Clock();
     const currentBlobIDs = new Set();
     const currentTreeIDs = new Set();
     const currentFoodIDs = new Set();
+    const terrainChunks = useRef({});
 
     const [zoom, setZoom] = useState(2);
     const [cameraSettings, setCameraSettings] = useState({
@@ -43,9 +45,80 @@ function GameCanvas() {
 
     const [isFPV, setFPV] = useState(null);
     const isFPVRef = useRef(isFPV);
+    const mapDataRef = useRef(null);
+
+    // State to track pending object placements
+    const pendingObjectPlacements = useRef({
+        blobs: [],
+        trees: [],
+        food: [],
+        decorations: []
+    });
+
+    /****
+     * updateObjectPosition - pick arrays of objects with deffered y-position calculation, and re-assert
+     *
+     */
+
+    const updateObjectsPosition = () => {
+        if(!mapData || !mapData.width) return;
+        // Process pending blobs
+        pendingObjectPlacements.current.blobs.forEach(blob => {
+            const z = getYPosition(blob.displayX, blob.displayY);
+            let blobMesh = blobsRef.current[blob.id];
+            if(blobMesh) {
+                blobMesh.position.set(blob.displayX, 0.4 + z, blob.displayY);
+            }
+            // Set other necessary properties and add to scene if not already added
+        });
+
+        // Similar processing for trees and food
+        pendingObjectPlacements.current.trees.forEach(tree => {
+            const z = getYPosition(tree.displayX, tree.displayY, true);
+            let treeMesh = treeRef.current.instances[tree.id];
+            treeMesh.position.set(tree.displayX, z, tree.displayY);
+            console.log('Set tree '+tree.id+' position to: ', tree.displayX, z, tree.displayY);
+            // Set other necessary properties and add to scene if not already added
+        });
+
+        pendingObjectPlacements.current.food.forEach(foodItem => {
+            const z = getYPosition(foodItem.displayX, foodItem.displayY);
+            let foodMesh = foodRef.current.instances[foodItem.id];
+            if(!foodMesh) {
+                // console.error('Food mesh not found for ', foodItem, foodRef.current.instances);
+                return;
+            }
+            foodMesh.position.set(foodItem.displayX, z, foodItem.displayY);
+            // Set other necessary properties and add to scene if not already added
+        });
+
+        // Clear the arrays after processing
+        pendingObjectPlacements.current.blobs = [];
+        pendingObjectPlacements.current.trees = [];
+        pendingObjectPlacements.current.food = [];
+        pendingObjectPlacements.current.decorations = [];
+    };
+
+    /*onMessage('map-heights', (payload) => {
+        // Assume terrain chunks are updated here
+        payload.terrain.forEach(chunk => {
+            updateTerrainChunk(scene, chunk);
+        });
+
+        // After updating terrain, process any pending object placements
+        updateObjectsPosition();
+    });
+
+    onMessage('blobs-coordinates', payload => {
+        // Instead of directly placing blobs, store them if terrain might not be ready
+        pendingObjectPlacements.current.blobs.push(...payload.blobs);
+        updateObjectsPosition(); // Try to update positions if terrain is ready
+    });*/
+
+
 
     onMessage('total-stats', payload => {
-        setTotalStats(payload);
+        setTotalStats(prev => ({...prev, ...payload}));
     })
 
     useEffect(() => {
@@ -125,6 +198,7 @@ function GameCanvas() {
     useEffect(() => {
         cameraSettingsRef.current = cameraSettings;
         debounce(sendData, 500)('camera-position', cameraSettingsRef.current);
+        console.log('dbc: ', cameraSettings);
         // sendData('camera-position', cameraSettingsRef.current);
     }, [cameraSettings]);
 
@@ -135,17 +209,17 @@ function GameCanvas() {
 
             const currentCameraSettings = cameraSettingsRef.current;
 
-            console.error('ROTATING!!!', currentCameraSettings.position, currentCameraSettings.target);
+            // console.error('ROTATING!!!', currentCameraSettings.position, currentCameraSettings.target);
 
             if (cameraRef.current) {
                 const camera = cameraRef.current;
-                console.log("Old camera position:", currentCameraSettings.position.x, currentCameraSettings.position.y, currentCameraSettings.position.z);
+                // console.log("Old camera position:", currentCameraSettings.position.x, currentCameraSettings.position.y, currentCameraSettings.position.z);
 
                 const radius = camera.position.distanceTo(currentCameraSettings.target);
-                console.log('radius: ', radius);
+                // console.log('radius: ', radius);
                 const phi = Math.atan2(camera.position.z - currentCameraSettings.target.z, camera.position.x - currentCameraSettings.target.x);
                 const theta = Math.atan2(Math.sqrt((camera.position.x - currentCameraSettings.target.x) ** 2 + (camera.position.z - currentCameraSettings.target.z) ** 2), camera.position.y - currentCameraSettings.target.y);
-                console.log('Angles: ', phi, theta);
+                // console.log('Angles: ', phi, theta);
                 const newPhi = phi + deltaX;
                 const newTheta = Math.min(Math.max(theta + deltaY, 0.01), (Math.PI / 2) - 0.01);
 
@@ -153,7 +227,7 @@ function GameCanvas() {
                 const newZ = currentCameraSettings.target.z + radius * Math.sin(newTheta) * Math.sin(newPhi);
                 const newY = currentCameraSettings.target.y + radius * Math.cos(newTheta);
 
-                console.log("New camera position:", newX, newY, newZ, currentCameraSettings.target);
+                // console.log("New camera position:", newX, newY, newZ, currentCameraSettings.target);
 
                 setCameraSettings(prev => ({
                     ...prev,
@@ -178,12 +252,137 @@ function GameCanvas() {
         sendData('select-blob', { id: selectedBlob });
     }, [selectedBlob]);
 
+    const getYPosition = (x, z, logWarn = false) => {
+        // Calculate the key for the chunk based on the x and z coordinates
+        const size = mapDataRef.current.pointsPerSample * mapDataRef.current.samplesPerChunk; // Assume each chunk covers a 200x200 area
+        const xIndex = Math.floor((x + 0.5*mapDataRef.current.width) / size);
+        const zIndex = Math.floor((z + 0.5*mapDataRef.current.height) / size);
+        const key = `${xIndex * size},${zIndex * size}`;
+
+        // Retrieve the relevant chunk from the stored terrain chunks
+        const chunk = terrainChunks.current[key];
+        if (chunk) {
+            // Calculate local coordinates within the chunk
+            const localX = x + 0.5*mapDataRef.current.width - xIndex * size;
+            const localZ = z + 0.5*mapDataRef.current.height - zIndex * size;
+
+            // Assume grid points are defined at every pointsPerSample interval
+            const baseX = Math.floor(localX / mapDataRef.current.pointsPerSample) * mapDataRef.current.pointsPerSample;
+            const baseZ = Math.floor(localZ / mapDataRef.current.pointsPerSample) * mapDataRef.current.pointsPerSample;
+            const nextX = baseX + mapDataRef.current.pointsPerSample;
+            const nextZ = baseZ + mapDataRef.current.pointsPerSample;
+
+            // Fetch the heights from the four nearest vertices
+            const Q11 = chunk.userData.map[`${baseX},${baseZ}`];  // Bottom-left
+            const Q21 = chunk.userData.map[`${nextX},${baseZ}`];  // Bottom-right
+            const Q12 = chunk.userData.map[`${baseX},${nextZ}`];  // Top-left
+            const Q22 = chunk.userData.map[`${nextX},${nextZ}`];  // Top-right
+
+            // Calculate the relative positions
+            const dx = (localX - baseX) / mapDataRef.current.pointsPerSample;
+            const dz = (localZ - baseZ) / mapDataRef.current.pointsPerSample;
+
+            // Perform bilinear interpolation
+            const interpolatedHeight = (Q11 * (1 - dx) * (1 - dz)) +
+                (Q21 * dx * (1 - dz)) +
+                (Q12 * (1 - dx) * dz) +
+                (Q22 * dx * dz);
+
+            return interpolatedHeight;
+        }
+
+        if(logWarn) {
+            console.warn(`chunk: ${key} wasn't found at ${x}:${z}`, terrainChunks.current[key], size, mapData, terrainChunks.current);
+        }
+
+        return 0; // Return a default value if no intersection is found
+    }
+
+
+    function updateTerrainChunk(scene, heightData) {
+        const size = mapData.pointsPerSample * mapData.samplesPerChunk;  // size of each chunk
+        const segments = mapData.samplesPerChunk;  // How finely you want to segment the terrain
+        const chunkWidth = size;
+        const chunkDepth = size;
+
+        // If the chunk already exists, we first remove it
+        if (terrainChunks.current[heightData.key]) {
+            // disposeChunk(key);
+            return;
+        }
+
+        // Create the geometry
+        const geometry = new THREE.PlaneGeometry(chunkWidth, chunkDepth, segments, segments);
+        geometry.rotateX(-Math.PI / 2);  // Align the geometry with the xz plane
+
+        // Adjust the vertex heights according to the height data
+        const positions = geometry.attributes.position.array;
+        for (let i = 0, l = positions.length; i < l; i += 3) {
+            const x = Math.floor(+positions[i] + (heightData.width / 2));
+            const z = Math.floor(+positions[i + 2] + (heightData.height / 2));
+            const heightKey = `${x},${z}`;
+            // console.log('Key: ', heightData.width, heightData.height, positions[i], positions[i+2], heightKey);
+            positions[i + 1] = heightData.map[heightKey] || 0;
+        }
+
+        geometry.computeVertexNormals();  // Recompute normals for proper lighting
+
+        let params = { color: 0x557633 };
+        if(heightData.key === '4800,4800') {
+            params = { color: 0x996633 };
+        }
+        const material = new THREE.MeshLambertMaterial(params);
+        const mesh = new THREE.Mesh(geometry, material);
+
+        // Position the mesh according to its key
+
+        mesh.position.set(heightData.displayX, 0, heightData.displayY);
+
+        console.log('terr_key: ', heightData.key, positions.length, chunkWidth, chunkDepth, segments);
+        if(heightData.key === '4800,4800') {
+            console.log('DISPLAY_AT: ', heightData.displayX, 0, heightData.displayY);
+        }
+        mesh.frustumCulled = false;
+        mesh.geometry.computeBoundingBox();
+        scene.add(mesh);
+        mesh.userData.map = heightData.map;
+        terrainChunks.current[heightData.key] = mesh;  // Store the chunk
+        scene.updateMatrixWorld(true);
+    }
+
+    function disposeChunk(scene, key) {
+        const mesh = terrainChunks.current[key];
+        if (mesh) {
+            scene.remove(mesh);
+            if (mesh.geometry) mesh.geometry.dispose();
+            if (mesh.material) mesh.material.dispose();
+            delete terrainChunks.current[key];
+        }
+    }
+
+
+    onMessage('map-data', (payload) => {
+        setMapData(payload);
+        mapDataRef.current = payload;
+        console.log('map-data: ', payload);
+
+    })
+
+    useEffect(() => {
+        console.log('updatedMapData', mapData);
+        sendData('init-map', { width: 10000, height: 10000 })
+    }, []);
+
 
     useEffect(() => {
         if (!worker) {
             console.log('worker: ', worker);
             return;
         }
+        if(!mapData || !mapData.width) {
+            return ;
+        }
+        console.log('INITIALIZED MAP...');
         const scene = new THREE.Scene();
         const aspect = window.innerWidth / window.innerHeight;
         // const camera = new THREE.OrthographicCamera(-aspect * 10, aspect * 10, 10, -10, 1, 1000);
@@ -208,18 +407,27 @@ function GameCanvas() {
         directionalLight.position.set(0, 10, 0);
         scene.add(directionalLight);
 
+        onMessage('map-heights', (payload) => {
+            const receivedKeys = new Set(payload.terrain.map(({ key }) => key));  // Keys from the payload
+            console.log('payload.terrain: ', payload.terrain, mapData);
 
+            // Generate new or update existing chunks
+            payload.terrain.forEach((chunk) => {
+                updateTerrainChunk(scene, chunk);
+            });
 
-        onMessage('map-data', (payload) => {
-            const planeGeometry = new THREE.PlaneGeometry(payload.width, payload.height);
-            const planeMaterial = new THREE.MeshBasicMaterial({ color: 0x228b22, side: THREE.DoubleSide });
-            const plane = new THREE.Mesh(planeGeometry, planeMaterial);
-            plane.rotation.x = -Math.PI / 2;
-            scene.add(plane);
-        })
+            // Remove chunks not present in the new payload
+            Object.keys(terrainChunks.current).forEach(key => {
+                if (!receivedKeys.has(key)) {
+                    disposeChunk(scene, key);
+                }
+            });
+
+            // updateObjectsPosition();
+        });
 
         onMessage('selected-blob-data', payload => {
-            // console.log('Selected blob: ', payload);
+            console.log('Selected blob: ', payload);
             setSelectedBlobData(payload);
         })
 
@@ -235,8 +443,8 @@ function GameCanvas() {
                 loadedAssets++;
                 if (loadedAssets === assetsToLoad) {
                     // All assets are loaded
-                    console.log('All assets loaded');
-                    sendData('init-map', { width: 10000, height: 10000 })
+                    console.log('ALL ASSETS LOADED');
+                    sendData('assets-loaded', {  })
                 }
             };
 
@@ -329,6 +537,7 @@ function GameCanvas() {
             // console.log('blobsReceived: ', payload.blobs);
             const newBlobIDs = new Set();
             payload.blobs.forEach(blob => {
+                // pendingObjectPlacements.current.blobs.push(blob);
                 newBlobIDs.add(blob.id);
                 let blobMesh = blobsRef.current[blob.id];
                 let mixer = mixers.current.get(blob.id);
@@ -350,8 +559,9 @@ function GameCanvas() {
                     // console.log('currList: ', blobsRef.current);
                 }
 
-                blobMesh.position.set(blob.displayX, 0.4, blob.displayY);
+                blobMesh.position.set(blob.displayX, 0.4 + blob.displayZ, blob.displayY);
                 blobMesh.rotation.y = - Math.PI / 2 - blob.angle;
+                blobMesh.scale.set(0.25*blob.scale, 0.25*blob.scale, 0.25*blob.scale);
 
                 if (blob.animation !== blobMesh.userData.prevAnimation) {
                     if(!blob.animation) {
@@ -372,6 +582,7 @@ function GameCanvas() {
                 blobMesh.userData.x = blob.displayX;
                 blobMesh.userData.y = blob.displayY;
                 blobMesh.userData.angle = blob.angle;
+                blobMesh.userData.z = blob.displayZ;
             });
 
             // Now, handle removal of blobs not in the new payload
@@ -421,8 +632,10 @@ function GameCanvas() {
         onMessage('food-coordinates', payload => {
             const receivedFood = payload.food;
             // console.log('received food: ', receivedFood);
+            setTotalStats(prev => ({...prev, ...payload.stats}));
             const newFoodIDs = new Set();
             receivedFood.forEach(foodItem => {
+                // pendingObjectPlacements.current.food.push(foodItem);
                 newFoodIDs.add(foodItem.id);
                 if (!foodRef.current.instances[foodItem.id]) {
                     // If an instance for this ID doesn't exist, create it
@@ -431,7 +644,7 @@ function GameCanvas() {
                     foodMesh.scale.set(0.25,0.25,0.25);
 
                     // Set the mesh properties based on incoming data
-                    foodMesh.position.set(foodItem.displayX, 0.1, foodItem.displayY);
+                    foodMesh.position.set(foodItem.displayX, foodItem.displayZ, foodItem.displayY);
                     foodMesh.rotation.y = foodItem.angle;  // Assuming angle is in radians
                     foodMesh.userData = { id: foodItem.id };
 
@@ -463,51 +676,14 @@ function GameCanvas() {
             setFood(receivedFood);
         })
 
-        /*onMessage('tree-coordinates', payload => {
-            const receivedTrees = payload.trees;
-            console.log('received trees: ', receivedTrees);
-            receivedTrees.forEach(treeItem => {
-                if (!treeRef.current[treeItem.id]) {
-                    // If an instance for this ID doesn't exist, create it
-                    let treeMesh;
-                    if(treeItem.type === 'v0') {
-                        treeMesh = treeRef.current.model.clone();
-                    } else if(treeItem.type === 'v1') {
-                        treeMesh = treeRef.current.modelv2.clone();
-                    } else if(treeItem.type === 'v2') {
-                        treeMesh = treeRef.current.modelv3.clone();
-                    }
-
-                    // treeMesh.scale.set(0.25,0.25,0.25);
-
-                    // Set the mesh properties based on incoming data
-                    treeMesh.position.set(treeItem.displayX, 0, treeItem.displayY);
-                    console.log('Tree position:', treeMesh.position);
-                    treeMesh.rotation.y = treeItem.angle;  // Assuming angle is in radians
-                    treeMesh.userData = { id: treeItem.id };
-
-                    // Add the mesh to the scene
-                    scene.add(treeMesh);
-
-                    // Store the mesh in ref for potential updates
-                    treeRef.current[treeItem.id] = treeMesh;
-                } else {
-                    // Update existing mesh position and rotation if it already exists
-                    const treeMesh = treeRef.current[treeItem.id];
-                    treeMesh.position.set(treeItem.displayX, 0, treeItem.displayY);
-                    treeMesh.rotation.y = treeItem.angle;
-                }
-            });
-            setTrees(receivedTrees);
-        })*/
-
         onMessage('tree-coordinates', payload => {
-            // console.log('received-trees: ', payload.trees.length);
+            console.log('received-trees: ', payload.trees);
 
             const newTreeIDs = new Set();
             // Process received trees and update or create new ones
             payload.trees.forEach(treeItem => {
                 newTreeIDs.add(treeItem.id);
+                // pendingObjectPlacements.current.trees.push(treeItem);
                 let treeMesh = treeRef.current.instances[treeItem.id];
                 if (!treeMesh) {
                     // Create new tree mesh
@@ -519,7 +695,8 @@ function GameCanvas() {
                         treeMesh = treeRef.current.models.modelv3.clone();
                     }
 
-                    treeMesh.position.set(treeItem.displayX, 0, treeItem.displayY);
+                    // const y = getYPosition(treeItem.displayX, treeItem.displayY);
+                    treeMesh.position.set(treeItem.displayX, treeItem.displayZ, treeItem.displayY);
                     treeMesh.rotation.y = treeItem.angle;
                     treeMesh.userData = { id: treeItem.id };
                     treeMesh.frustumCulled = true;
@@ -570,6 +747,14 @@ function GameCanvas() {
         }
 
         preloadAssets();
+
+        setCameraSettings({
+            position: { x: 0, y: 100, z: 100 },
+            target: { x: 0, y: getYPosition(0, 0), z: 0 }
+        });
+
+        setZoom(0.5);
+
         animate();
 
         return () => {
@@ -578,7 +763,7 @@ function GameCanvas() {
             }
             // window.removeEventListener('mouseup', syncCameraState);
         };
-    }, []);
+    }, [mapData]);
 
     function updateCamera() {
         /*if (!cameraRef.current) return;
@@ -618,12 +803,12 @@ function GameCanvas() {
             cameraSettings.position.z - cameraSettings.target.z,
             );
 
-        cameraSettings.target.x = blob.position.x;
+        /*cameraSettings.target.x = blob.position.x;
         cameraSettings.target.y = blob.position.y;
         cameraSettings.target.z = blob.position.z;
 
         cameraSettings.position.x = blob.position.x + offsets.x;
-        cameraSettings.position.y = blob.position.y + offsets.y;
+        cameraSettings.position.y = blob.position.y + offsets.y;*/
 
         setCameraSettings(() => {
             return {
@@ -696,7 +881,7 @@ function GameCanvas() {
         /*const drX = dX * Math.cos(phi) - dZ * Math.sin(phi);
         const drZ = dX * Math.sin(phi) + dZ * Math.cos(phi);*/
         const drX = dX * Math.sin(phi) + dZ * Math.cos(phi);
-        const drZ = dX * Math.cos(phi) + dZ * Math.sin(phi);
+        const drZ = -dX * Math.cos(phi) + dZ * Math.sin(phi);
 
         console.log("dX, dZ:", dX, dZ);
         console.log("drX, drZ:", drX, drZ);
@@ -704,7 +889,7 @@ function GameCanvas() {
         // Apply the calculated positional changes to the camera settings
         setCameraSettings(prev => ({
             position: { ...prev.position, x: prev.position.x + drX, z: prev.position.z + drZ },
-            target: { ...prev.target, x: prev.target.x + drX, z: prev.target.z + drZ }
+            target: { ...prev.target, x: prev.target.x + drX, z: prev.target.z + drZ, y: getYPosition(prev.target.x + drX, prev.target.z + drZ, true) }
         }));
     }, [cameraSettings.target, cameraSettings.position]);
 
@@ -720,7 +905,7 @@ function GameCanvas() {
     }
 
     function handleZoomOut() {
-        setZoom(zoom => zoom * 0.9);
+        setZoom(zoom => Math.max(0.25, zoom * 0.9));
     }
 
     /*function moveCamera(dx, dy) {
@@ -775,9 +960,13 @@ function GameCanvas() {
         {selectedBlob ? (<BlobDetails {...selectedBlobData} onFollow={onFollow} isFollowing={isFollow} onSetFPV={onSetFPV} isFPV={isFPV}/>) : null}
         <div className={'box heading'}>
             <p>Blobs Alive: {totalStats.totalBlobs}</p>
+            <p>Births/dies: {totalStats.born} / {totalStats.died}</p>
             <p>Male: {totalStats.totalMale}</p>
             <p>Female: {totalStats.totalFemale}</p>
             <p>Average Age: {totalStats.averageAge}</p>
+            <p>Food: {totalStats.totalFood}</p>
+            <p>Eaten: {totalStats.foodEaten}</p>
+            <p>Grown: {totalStats.foodGrown}</p>
         </div>
         <div className={'boxes transparent-buttons'}>
             <button onClick={handleZoomIn}>Zoom In</button>

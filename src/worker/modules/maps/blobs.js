@@ -10,7 +10,7 @@ export class Blobs extends GameModule {
     instance;
     selectedBlob;
 
-    constructor() {
+    constructor(gameMap) {
         if(Blobs.instance) {
             return Blobs.instance;
         }
@@ -18,14 +18,17 @@ export class Blobs extends GameModule {
         this.visibleBlobs = {};
         this.nonVisibleBlobs = {};
         Blobs.instance = this;
+        this.gameMap = gameMap;
         this.eventHandler.registerHandler('select-blob', payload => {
             if(payload.id) {
                 this.selectedBlob = this.blobs[payload.id];
             } else {
                 this.selectedBlob = null;
             }
-            this.eventHandler.sendData('selected-blob-data', this.selectedBlob);
+            // this.eventHandler.sendData('selected-blob-data', this.dataToDisplay(this.selectedBlob));
         })
+        this.blobBorn = 0;
+        this.blobDied = 0;
     }
 
     seedLife(amount, map) {
@@ -33,19 +36,22 @@ export class Blobs extends GameModule {
         this.map = map;
         this.blobs = Array.from({length: amount}, (_, id) => {
             const angle = Math.random() * 2 * Math.PI; // Random angle in radians
-            const speed = 0.5 + 0.3 * Math.random();
+            const speed = 0.4 + 0.3 * Math.random();
             return {
                 id,
                 speed,
-                x: Math.random() * map.width,
-                y: Math.random() * map.height,
+                x: Math.random() * Math.min(map.width, 30*Math.sqrt(amount)) + map.width / 2,
+                y: Math.random() * Math.min(map.height, 30*Math.sqrt(amount)) + map.height / 2,
                 dx: 0,
                 dy: 0,
                 angle,
                 age: 1 + Math.random(),
                 foodCapacity: 100,
                 food: 60 + Math.random()*40,
-                sex: Math.floor(Math.random() * 2)
+                sex: Math.floor(Math.random() * 2),
+                lastBreedTime: -Infinity,
+                isPregnant: false,
+                pregnancyTime: 0
             };
         }).reduce((acc, item) => { acc[item.id] = item; return acc}, {});
         Object.values(this.blobs).forEach(blob => {
@@ -68,6 +74,8 @@ export class Blobs extends GameModule {
     blobDie(id, reason) {
         new Grid().removeBlob(this.blobs[id])
         delete this.blobs[id];
+        console.log('Blob died because of '+reason);
+        this.blobDied++;
         // this.eventHandler.sendData('delete-blob', { id })
     }
 
@@ -110,6 +118,154 @@ export class Blobs extends GameModule {
         }
     }
 
+    moveRandomPoint(blob) {
+        if(!blob.randomPoint) {
+            const rD = 100;
+            const angle = Math.random() * 2 * Math.PI;
+            blob.randomPoint = {
+                x: rD * Math.cos(angle),
+                y: rD * Math.sin(angle),
+            }
+            blob.angle = angle;
+        }
+
+        const dist = Math.sqrt(
+            (blob.randomPoint.x - blob.x) ** 2
+            + (blob.randomPoint.y - blob.y) ** 2
+        )
+
+        if(dist < 1) {
+            blob.randomPoint = undefined
+        } else {
+            blob.dx = blob.speed * Math.cos(blob.angle);
+            blob.dy = blob.speed * Math.sin(blob.angle);
+        }
+
+    }
+
+    moveTowards(blob, target, distance) {
+        blob.randomPoint = undefined;
+        if(!target) {
+            console.warn('Invalid target!', blob, target);
+            return;
+        }
+        if(distance < 0.1) {
+            blob.dx = 0;
+            blob.dy = 0;
+            return;
+        }
+        const directionX = (target.x - blob.x) / distance;
+        const directionY = (target.y - blob.y) / distance;
+        blob.dx = blob.speed * directionX;
+        blob.dy = blob.speed * directionY;
+        blob.angle = Math.atan2(directionY, directionX);
+    }
+
+
+    manageIdleState(blob, dT) {
+        blob.idlingTimer = (blob.idlingTimer || 0) + dT;
+        if (blob.idlingTimer > 10) {
+            blob.idlingTimer = 0;
+            if (Math.random() > 0.4) {
+                const angle = Math.random() * 2 * Math.PI;
+                blob.dx = blob.speed * Math.cos(angle);
+                blob.dy = blob.speed * Math.sin(angle);
+                blob.angle = angle;
+            } else {
+                blob.dx = 0;
+                blob.dy = 0;
+            }
+        }
+    }
+
+    attemptToBreed(blob, dT) {
+        blob.wantToBreed = false;
+        // Check if blob is ready to breed
+        if (blob.food > blob.foodCapacity * 0.5 && (blob.age - blob.lastBreedTime > 0.5) && blob.age > 1) {
+            blob.wantToBreed = true;
+            blob.action = 'Look for partner';
+            if(!blob.potentialPartner || blob.potentialPartner.wantToBreed == false) {
+                blob.potentialPartner = undefined;
+                const others = new Grid().getNearbyBlob(blob.x, blob.y, 3);
+                const potentialPartners = others
+                    .map(o => this.blobs[o])
+                    .filter(other => other && (other.sex !== blob.sex) && other.wantToBreed)
+                    .sort((a, b) => {
+                        const distA = Math.sqrt((blob.x - a.x) ** 2 + (blob.y - a.y) ** 2);
+                        const distB = Math.sqrt((blob.x - b.x) ** 2 + (blob.y - b.y) ** 2);
+                        return distA - distB;
+                    });
+
+                blob.potentialPartner = potentialPartners[0];
+                // console.log('SET POT PAR: ', potentialPartners, others);
+            }
+
+            if(blob.potentialPartner) {
+                blob.action = 'Found partner';
+                const distance = Math.sqrt((blob.x - blob.potentialPartner.x) ** 2 + (blob.y - blob.potentialPartner.y) ** 2)
+                if(distance < 1) {
+                    blob.dx = 0;
+                    blob.dy = 0;
+                    blob.potentialPartner.dx = 0;
+                    blob.potentialPartner.dy = 0;
+                    if (blob.sex === 1) { // Female
+                        blob.isPregnant = true;
+                        blob.pregnancyTime = 30; // days
+                    } else
+                    if (blob.potentialPartner.sex === 1) { // Female
+                        blob.potentialPartner.isPregnant = true;
+                        blob.potentialPartner.pregnancyTime = 30; // days
+                    }
+                    // Reset breeding timers
+                    blob.lastBreedTime = blob.age;
+                    blob.potentialPartner.lastBreedTime = blob.potentialPartner.age;
+                } else {
+                    // console.log('blb: ', blob, blob.potentialPartner, distance);
+                    this.moveTowards(blob, blob.potentialPartner, distance);
+                }
+            } else {
+                // walk randomly seeking for...
+                this.moveRandomPoint(blob);
+            }
+
+        } else {
+            blob.wantToBreed = false;
+        }
+
+        if (blob.isPregnant) {
+            blob.pregnancyTime -= dT;
+            if (blob.pregnancyTime <= 0) {
+                this.spawnChildren(blob);
+                blob.isPregnant = false;
+            }
+        }
+    }
+
+    spawnChildren(blob) {
+        const numChildren = Math.floor(Math.random() * 3) + 1; // 1 to 3 children
+        this.blobBorn += numChildren;
+        for (let i = 0; i < numChildren; i++) {
+            const child = {
+                id: `${Math.round(Math.random()*10000000)}`,
+                speed: 0.4 + 0.3 * Math.random(),
+                x: blob.x + (Math.random() - 0.5) * 2,
+                y: blob.y + (Math.random() - 0.5) * 2,
+                dx: 0,
+                dy: 0,
+                angle: Math.random() * 2 * Math.PI,
+                age: 0,
+                foodCapacity: 100,
+                food: 50,
+                sex: Math.floor(Math.random() * 2),
+                lastBreedTime: 0,
+                isPregnant: false,
+                pregnancyTime: 0
+            };
+            this.blobs[child.id] = child;
+            new Grid().addBlob(child);
+        }
+    }
+
     makeDecisions(blob, dT) {
         blob.action = 'Idle';
         blob.animation = '';
@@ -144,12 +300,17 @@ export class Blobs extends GameModule {
                 blob.dy = 0;
                 blob.animation = 'Eat'
             } else {
-                const directionX = (blob.closestFood.x - blob.x) / distance;
+                this.moveTowards(blob, blob.closestFood, distance);
+                /*const directionX = (blob.closestFood.x - blob.x) / distance;
                 const directionY = (blob.closestFood.y - blob.y) / distance;
                 blob.dx = blob.speed * directionX;
                 blob.dy = blob.speed * directionY;
-                blob.angle = Math.atan2(directionY, directionX);
+                blob.angle = Math.atan2(directionY, directionX);*/
             }
+        }
+
+        if(blob.action === 'Idle') {
+            this.attemptToBreed(blob, dT);
         }
 
         if(blob.action === 'Idle') {
@@ -158,10 +319,7 @@ export class Blobs extends GameModule {
             if(blob.idlingTimer > 10) {
                 blob.idlingTimer = 0;
                 if(Math.random() > 0.4) {
-                    const angle = Math.random() * 2 * Math.PI;
-                    blob.dx = blob.speed * Math.cos(angle);
-                    blob.dy = blob.speed * Math.sin(angle);
-                    blob.angle = angle;
+                    this.moveRandomPoint(blob);
                 } else {
                     blob.dx = 0;
                     blob.dy = 0;
@@ -207,6 +365,13 @@ export class Blobs extends GameModule {
     }
 
     moveBlob(blob, dT) {
+        if(Number.isNaN(blob.dx) ) {
+            return;
+        }
+        if(Number.isNaN(blob.dy) ) {
+            return;
+        }
+
         const pX = blob.x;
         const pY = blob.y;
         blob.x += blob.dx*dT;
@@ -238,7 +403,7 @@ export class Blobs extends GameModule {
     }
 
     process(dT) {
-        const str = performance.now();
+        // const str = performance.now();
         const blobArr = Object.values(this.blobs);
         let age = 0;
         let males = 0;
@@ -249,6 +414,9 @@ export class Blobs extends GameModule {
 
         blobArr.forEach(blob => {
             this.handleBlobDeathProbability(blob, dT);
+            if(blob.food <= 0) {
+                this.blobDie(blob.id, 'HUNGER');
+            }
             const isVisible = vp.checkVisibility(blob);
             if(isVisible) {
                 blob.isVisible = true;
@@ -281,22 +449,29 @@ export class Blobs extends GameModule {
             averageAge: Math.round(100 * age / blobArr.length) / 100,
             totalMale: males,
             totalFemale: females,
+            born: this.blobBorn,
+            died: this.blobDied
         });
-        console.log('process took: ', performance.now() - str);
+        // console.log('process took: ', performance.now() - str);
     }
 
     displayBlobs() {
         let blobsArr = Object.values(this.visibleBlobs);
 
+        const viewPort = new MapViewport();
+        if(!viewPort.isUIReady) return;
 
         this.eventHandler.sendData('blobs-coordinates', { blobs: blobsArr.map(blob => ({
-                ...blob,
+                id: blob.id,
+                sex: blob.sex,
                 displayX: blob.x - this.map.width / 2,
                 displayY: blob.y - this.map.height / 2,
+                displayZ: this.gameMap.getZByXY(blob.x, blob.y),
                 angle: blob.angle,
                 cellX: blob.cell.col,
                 cellY: blob.cell.row,
-                animation: blob.animation
+                animation: blob.animation,
+                scale: blob.age < 1 ? 0.5 + 0.5 * blob.age : 1,
             }))
         })
         this.isFirstRender = false;
@@ -304,7 +479,7 @@ export class Blobs extends GameModule {
 
     dataToDisplay(blob) {
         return {
-            ...blob,
+            id: blob.id,
             displayX: Math.round(blob.x - this.map.width / 2),
             displayY: Math.round(blob.y - this.map.height / 2),
             angle: blob.angle,
@@ -317,7 +492,9 @@ export class Blobs extends GameModule {
             action: blob.action,
             animation: blob.animation,
             foodStat: `${Math.round(blob.food)} / ${Math.round(blob.foodCapacity)}`,
-            sex: blob.sex === 0 ? 'Male' : 'Female'
+            sex: blob.sex === 0 ? 'Male' : 'Female',
+            isPregnant: blob.isPregnant,
+            lastBreedTime: blob.lastBreedTime > 0 ? `${Math.round(((blob.age - blob.lastBreedTime) % 1)*365)} days ago` : 'Never'
         }
     }
 
