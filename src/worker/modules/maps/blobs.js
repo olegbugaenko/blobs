@@ -36,12 +36,12 @@ export class Blobs extends GameModule {
         this.map = map;
         this.blobs = Array.from({length: amount}, (_, id) => {
             const angle = Math.random() * 2 * Math.PI; // Random angle in radians
-            const speed = 0.4 + 0.3 * Math.random();
+            const speed = 0.3 + 0.2 * Math.random();
             return {
                 id,
                 speed,
-                x: Math.random() * Math.min(map.width, 30*Math.sqrt(amount)) + map.width / 2,
-                y: Math.random() * Math.min(map.height, 30*Math.sqrt(amount)) + map.height / 2,
+                x: Math.random() * Math.min(map.width, 20*Math.sqrt(amount)) + map.width / 2,
+                y: Math.random() * Math.min(map.height, 20*Math.sqrt(amount)) + map.height / 2,
                 dx: 0,
                 dy: 0,
                 angle,
@@ -71,9 +71,13 @@ export class Blobs extends GameModule {
         }
     }
 
-    blobDie(id, reason) {
+    removeBlob(id) {
         new Grid().removeBlob(this.blobs[id])
         delete this.blobs[id];
+    }
+
+    blobDie(id, reason) {
+        this.removeBlob(id);
         console.log('Blob died because of '+reason);
         this.blobDied++;
         // this.eventHandler.sendData('delete-blob', { id })
@@ -186,7 +190,7 @@ export class Blobs extends GameModule {
             blob.action = 'Look for partner';
             if(!blob.potentialPartner || blob.potentialPartner.wantToBreed == false) {
                 blob.potentialPartner = undefined;
-                const others = new Grid().getNearbyBlob(blob.x, blob.y, 3);
+                const others = new Grid().getNearbyBlob(blob.x, blob.y, 6); // attempt to increase range for finding partner
                 const potentialPartners = others
                     .map(o => this.blobs[o])
                     .filter(other => other && (other.sex !== blob.sex) && other.wantToBreed)
@@ -241,6 +245,11 @@ export class Blobs extends GameModule {
         }
     }
 
+    addBlob(blob) {
+        this.blobs[blob.id] = blob;
+        new Grid().addBlob(blob);
+    }
+
     spawnChildren(blob) {
         const numChildren = Math.floor(Math.random() * 3) + 1; // 1 to 3 children
         this.blobBorn += numChildren;
@@ -255,14 +264,13 @@ export class Blobs extends GameModule {
                 angle: Math.random() * 2 * Math.PI,
                 age: 0,
                 foodCapacity: 100,
-                food: 50,
+                food: 100,
                 sex: Math.floor(Math.random() * 2),
                 lastBreedTime: 0,
                 isPregnant: false,
                 pregnancyTime: 0
             };
-            this.blobs[child.id] = child;
-            new Grid().addBlob(child);
+            this.addBlob(child);
         }
     }
 
@@ -282,6 +290,10 @@ export class Blobs extends GameModule {
             if(!blob.eatingFood && !blob.closestFood) {
                 this.searchClosestFood(blob);
                 blob.action = 'Look for food';
+                if(!blob.closestFood) {
+                    console.log('Not found food nearby. Stranging...', blob);
+                    this.moveRandomPoint(blob);
+                }
             }
         } else {
             blob.isHungry = false;
@@ -498,4 +510,39 @@ export class Blobs extends GameModule {
         }
     }
 
+    dataToSaveBlob(blob) {
+        return {
+            id: blob.id,
+            angle: blob.angle,
+            speed: blob.speed,
+            dx: blob.dx,
+            dy: blob.dy,
+            x: blob.x,
+            y: blob.y,
+            age: blob.age,
+            sex: blob.sex,
+            lastBreedTime: blob.lastBreedTime,
+            pregnancyTime: blob.pregnancyTime,
+            food: blob.food,
+            foodCapacity: blob.foodCapacity
+        }
+    }
+
+    saveBlobs() {
+        const saveObject = {}
+        for(const key in this.blobs) {
+            saveObject[key] = this.dataToSaveBlob(this.blobs[key]);
+        }
+        return saveObject;
+    }
+
+    loadBlobs(saveObject) {
+        Object.keys(this.blobs).forEach(id => {
+            this.removeBlob(id);
+        });
+
+        Object.values(saveObject).forEach(blob => {
+            this.addBlob(blob);
+        })
+    }
 }

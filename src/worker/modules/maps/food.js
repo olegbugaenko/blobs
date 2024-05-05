@@ -48,7 +48,12 @@ export class Food extends GameModule {
 
     }
 
-    addFood(x, y, amount, type) {
+    addFood(food) {
+        this.food[food.id] = food;
+        new Grid().addFood(food);
+    }
+
+    generateFood(x, y, amount, type) {
         const id = `${Math.random()*10000}`;
         const angle = Math.random() * 2 * Math.PI;
         const food = {
@@ -59,14 +64,17 @@ export class Food extends GameModule {
             type,
             amount
         }
-        this.food[id] = food;
-        new Grid().addFood(food);
+        this.addFood(food);
         this.foodGrown++;
     }
 
-    foodDrain(id, reason) {
+    removeFood(id) {
         new Grid().removeFood(this.food[id]);
         delete this.food[id];
+    }
+
+    foodDrain(id, reason) {
+        this.removeFood(id);
         this.foodEaten++;
     }
 
@@ -105,7 +113,7 @@ export class Food extends GameModule {
         const chance = dT*0.1;
 
         if(Math.random() < chance) {
-            this.addFood(this.map.width*Math.random(), this.map.height*Math.random(),200, '');
+            this.generateFood(this.map.width*Math.random(), this.map.height*Math.random(),200, '');
         }
 
         this.displayFood();
@@ -140,6 +148,45 @@ export class Food extends GameModule {
             angle: food.angle,
             age: `${Math.floor(food.age)} years, ${Math.round((food.age % 1) * 365)} days`
         }
+    }
+
+    dataToSaveFood(food) {
+        return {
+            id: food.id,
+            angle: food.angle,
+            x: food.x,
+            y: food.y,
+            type: food.type,
+            amount: food.amount
+        }
+    }
+
+    saveFood() {
+        const saveObject = {}
+        saveObject.totalFood = Object.keys(this.food).length;
+
+        // store directly only food that's nearby to blobs
+        // implement logic based on cells (2D array of objects with 'food' and 'blobs' arrays)
+        // to call  this.dataToSaveFood only on these food items that has blobs also
+        const interestingCells = (new Grid()).getCellsAdjucentToBlobs();
+
+        const foodIds = interestingCells.reduce((acc, cell) => ([...acc, ...cell.food]), []);
+
+        saveObject.items = {};
+        foodIds.forEach(id => {
+            saveObject.items[id] = this.dataToSaveFood(this.food[id]);
+        })
+        return saveObject;
+    }
+
+    loadFood(saveObject) {
+        Object.keys(this.food).forEach(id => {
+            this.removeFood(id);
+        });
+
+        Object.values(saveObject.items).forEach(food => {
+            this.addFood(food);
+        })
     }
 
 }

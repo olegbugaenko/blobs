@@ -5,6 +5,8 @@ import {Grid} from "./grid";
 import {Tree} from "./trees";
 import {MapViewport} from "./map-viewport";
 import {applyGaussianBlur} from "../../shared/terrain-utils";
+import {Decorations} from "./decorations";
+import {SeededRandom} from "../../shared/seed";
 
 export class GameMap extends GameModule {
 
@@ -12,23 +14,35 @@ export class GameMap extends GameModule {
 
     instance;
 
+    isRunningMap = false;
+
     constructor() {
         if(GameMap.instance) {
             return GameMap.instance;
         }
         super();
+        this.seed = '';
         this.blobs = new Blobs(this);
         this.food = new Food(this);
         this.tree = new Tree(this);
+        this.grid = new Grid();
+        this.decorations = new Decorations(this);
         this.mapViewport = new MapViewport();
         this.eventHandler.registerHandler('init-map', (payload) => {
-            console.log('Initing Map');
-            this.map = {
-                width: payload.width || 100,
-                height: payload.height || 100,
-                pointsPerSample: 20,
-                samplesPerChunk: 5
+            // TODO: Check if load existing
+            let isNewMap = false;
+            if(!this.seed) {
+                isNewMap = true;
+                this.seed = this.initializeRandomSeed();
+                console.log('Creating new Map');
+                this.map = {
+                    width: payload.width || 100,
+                    height: payload.height || 100,
+                    pointsPerSample: 20,
+                    samplesPerChunk: 5
+                }
             }
+
             console.log('Generate heights');
             this.generateHeights();
             console.log('Heights generated', this.map.heightsData);
@@ -37,12 +51,20 @@ export class GameMap extends GameModule {
             this.mapViewport.init(this.map);
             console.log('Map initialized: ', payload);
             this.postMap();
-            this.blobs.seedLife(10, this.map);
-            this.food.seedFood(mapSize / 1000, this.map);
+            if(isNewMap) {
+                this.blobs.seedLife(10, this.map);
+                this.food.seedFood(mapSize / 1000, this.map);
+            } else {
+                console.log('Using values from previously loaded map');
+            }
             this.tree.seedTree(mapSize / 1000, this.map);
             // this.tree.addTree(4512, 5155, this.map);
         })
         GameMap.instance = this;
+    }
+
+    initializeRandomSeed() {
+        return `${Math.random()*1000000000}`;
     }
 
     generateHeights(maxH = 50) {
@@ -56,12 +78,13 @@ export class GameMap extends GameModule {
         this.map.numChunksHeight = numH / this.map.samplesPerChunk;
         console.log('numH vs numW: ', numH, numW);
         this.map.heightsData = {};
+        const rand = new SeededRandom(this.seed);
 
         // Initialize a full height map
         let fullHeightMap = {};
         for (let x = 0; x < numW; x++) {
             for (let y = 0; y < numH; y++) {
-                fullHeightMap[`${x *  this.map.pointsPerSample},${y *  this.map.pointsPerSample}`] = Math.random() * maxH;
+                fullHeightMap[`${x *  this.map.pointsPerSample},${y *  this.map.pointsPerSample}`] = rand.nextDouble() * maxH;
             }
         }
 
@@ -96,52 +119,6 @@ export class GameMap extends GameModule {
             }
         }
     }
-
-    /*getZByXY(x, y) {
-        if(!this.map || !this.map.heightsData) return 0;
-        // Constants: Adjust these as per your actual setup
-        const chunkSize = this.map.pointsPerSample*this.map.samplesPerChunk;
-
-        // Calculate which chunk the point falls into
-        const chunkX = Math.floor(x / chunkSize);
-        const chunkY = Math.floor(y / chunkSize);
-        const chunkKey = `${chunkX * chunkSize},${chunkY * chunkSize}`;
-
-        // Retrieve the chunk from the stored data
-        const chunk = this.map.heightsData[chunkKey];
-        if (!chunk) {
-            console.error('No chunk found for the given coordinates.', chunkKey);
-            return 0; // Or any other default value
-        }
-
-        // Calculate local coordinates within the chunk
-        const localX = x - chunkX * chunkSize;
-        const localY = y - chunkY * chunkSize;
-
-        // Retrieve the nearest grid points for interpolation
-        // Ensuring that we do not exceed the boundaries of the chunk
-        const baseX = Math.floor(localX / this.map.pointsPerSample) * this.map.pointsPerSample;
-        const baseY = Math.floor(localY / this.map.pointsPerSample) * this.map.pointsPerSample;
-        const nextX = Math.min(baseX + this.map.pointsPerSample, chunk.width);
-        const nextY = Math.min(baseY + this.map.pointsPerSample, chunk.height);
-
-        // Simple bilinear interpolation for height
-        const Q11 = chunk.map[`${baseX},${baseY}`];
-        const Q12 = chunk.map[`${baseX},${nextY}`];
-        const Q21 = chunk.map[`${nextX},${baseY}`];
-        const Q22 = chunk.map[`${nextX},${nextY}`];
-
-        const fR1 = (((nextX - localX) / 50) * Q11) + (((localX - baseX) / 50) * Q21);
-        const fR2 = (((nextX - localX) / 50) * Q12) + (((localX - baseX) / 50) * Q22);
-
-        const interpolatedHeight = (((nextY - localY) / 50) * fR1) + (((localY - baseY) / 50) * fR2);
-
-        if(!interpolatedHeight || isNaN(interpolatedHeight)) {
-            console.warn(`interpolated ${interpolatedHeight} Qs: ${Q11},${Q12},${Q21},${Q22}`, baseX, baseY, nextX, nextY, `${baseX},${nextY}`,chunk.map);
-        }
-
-        return interpolatedHeight;
-    }*/
 
     getZByXY(x, y) {
         if (!this.map || !this.map.heightsData) return 0;
@@ -202,9 +179,10 @@ export class GameMap extends GameModule {
     }
 
     displayTerrain() {
+        if(!this.map.heightsData) return;
         const terrainChunks = Object.values(this.map.heightsData);
         const viewPort = new MapViewport();
-        const terrainArr = viewPort.filterVisible(terrainChunks, 1000);
+        const terrainArr = viewPort.filterVisible(terrainChunks, 1000, 4);
 
         // if(!)
 
@@ -232,8 +210,36 @@ export class GameMap extends GameModule {
         if(this.map) {
             this.blobs.process(dT);
             this.food.process(dT);
+            this.decorations.process(dT);
             this.displayTerrain();
+            const minimap = this.grid.generateMiniMap(100, this.mapViewport.position?.target);
+            this.eventHandler.sendData('minimap', minimap);
         }
+    }
+
+    saveMap() {
+        const saveObject = {};
+
+        saveObject.blobs = this.blobs.saveBlobs();
+        saveObject.food = this.food.saveFood();
+        saveObject.view = this.mapViewport.saveView();
+        saveObject.seed = this.seed;
+        saveObject.mapProps = {
+            ...this.map,
+            heightsData: undefined,
+            heights: undefined
+        };
+        return saveObject;
+    }
+
+    loadMap(obj) {
+        this.blobs.loadBlobs(obj.blobs);
+        this.food.loadFood(obj.food);
+        this.tree.removeAll();
+        this.decorations.removeAll();
+        this.mapViewport.loadView(obj.view);
+        this.seed = obj.seed;
+        this.map = obj.mapProps;
     }
 
 }

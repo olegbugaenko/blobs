@@ -20,6 +20,18 @@ export class Main extends GameModule {
             }, 500);
         })
 
+        this.eventHandler.registerHandler('save-game', payload => {
+            const data = this.saveGame();
+            // const stringified = JSON.stringify(data);
+            this.eventHandler.sendData('game-saved', data);
+        })
+
+        this.eventHandler.registerHandler('load-game', payload => {
+            const data = this.loadGame(payload);
+            // const stringified = JSON.stringify(data);
+            this.eventHandler.sendData('game-loaded', data);
+        })
+
         Main.instance = this;
     }
 
@@ -29,6 +41,18 @@ export class Main extends GameModule {
 
     process(dT) {
         this.gameMap.process(dT);
+    }
+
+    saveGame() {
+        return {
+            map: this.gameMap.saveMap()
+        }
+    }
+
+    loadGame(obj) {
+        this.gameMap.loadMap(obj.map);
+        const final = { loaded: true, page: 'map' };
+        this.eventHandler.sendData()
     }
 
 

@@ -4,9 +4,11 @@ import * as THREE from 'three';
 import {useWorkerClient} from "../../general/client";
 import {BlobDetails} from "./blob-details";
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { SimplifyModifier } from 'three/examples/jsm/modifiers/SimplifyModifier.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import {disposeHierarchy} from "../../helpers/web-gl.helper";
 import {debounce} from "../../helpers/utils.helper";
+import {MiniMap} from "./mini-map";
 
 
 function GameCanvas() {
@@ -21,6 +23,7 @@ function GameCanvas() {
     const foodRef = useRef({ instances: {} });
     const [trees, setTrees] = useState([]);
     const treeRef = useRef({ models: {}, instances: {}});
+    const decorsRef = useRef({ models: {}, instances: {} });
     const { onMessage, sendData } = useWorkerClient(worker);
     const [ totalStats, setTotalStats ] = useState({});
     const [ mapData, setMapData ] = useState({});
@@ -29,13 +32,14 @@ function GameCanvas() {
     const clock = new THREE.Clock();
     const currentBlobIDs = new Set();
     const currentTreeIDs = new Set();
+    const currentDecorationIDs = new Set();
     const currentFoodIDs = new Set();
     const terrainChunks = useRef({});
 
-    const [zoom, setZoom] = useState(2);
     const [cameraSettings, setCameraSettings] = useState({
         position: { x: 0, y: 200, z: 300 },
-        target: { x: 0, y: 0, z: 0 }
+        target: { x: 0, y: 0, z: 0 },
+        zoom: 2,
     });
 
     const [selectedBlob, setSelectedBlob] = useState(null);
@@ -171,18 +175,24 @@ function GameCanvas() {
 
         const raycaster = new THREE.Raycaster();
         raycaster.setFromCamera(mouse, cameraRef.current);
-        const intersects = raycaster.intersectObjects(Object.values(blobsRef.current));
+        try {
+            const intersects = raycaster.intersectObjects(Object.values(blobsRef.current));
 
-        if (intersects.length > 0) {
-            const intr = getParentData(intersects[0].object)
-            console.log("You clicked on a blob!", intr, intersects[0].object);
-            setSelectedBlob(intr.userData.id);
-            // Example: Change color of the first intersected object
-            // intersects[0].object.material.color.setHex(Math.random() * 0xffffff);
-        } else {
-            console.log(event.target, event.target.tagName === 'canvas');
-            setSelectedBlob(null)
+            if (intersects.length > 0) {
+                const intr = getParentData(intersects[0].object)
+                console.log("You clicked on a blob!", intr, intersects[0].object);
+                setSelectedBlob(intr.userData.id);
+                // Example: Change color of the first intersected object
+                // intersects[0].object.material.color.setHex(Math.random() * 0xffffff);
+            } else {
+                console.log(event.target, event.target.tagName === 'canvas');
+                setSelectedBlob(null)
+            }
+        } catch (e) {
+            console.error(e);
+            console.error('IID: ', cameraRef.current, mouse, blobsRef.current);
         }
+
     }
 
     const handleWheel = (event) => {
@@ -198,7 +208,7 @@ function GameCanvas() {
     useEffect(() => {
         cameraSettingsRef.current = cameraSettings;
         debounce(sendData, 500)('camera-position', cameraSettingsRef.current);
-        console.log('dbc: ', cameraSettings);
+        // console.log('dbc: ', cameraSettings);
         // sendData('camera-position', cameraSettingsRef.current);
     }, [cameraSettings]);
 
@@ -231,7 +241,8 @@ function GameCanvas() {
 
                 setCameraSettings(prev => ({
                     ...prev,
-                    position: { x: newX, y: newY, z: newZ }
+                    position: { x: newX, y: newY, z: newZ },
+                    zoom: prev.zoom
                 }));
             }
         } else if (event.buttons === 1) { // left button
@@ -338,7 +349,7 @@ function GameCanvas() {
 
         mesh.position.set(heightData.displayX, 0, heightData.displayY);
 
-        console.log('terr_key: ', heightData.key, positions.length, chunkWidth, chunkDepth, segments);
+        // console.log('terr_key: ', heightData.key, positions.length, chunkWidth, chunkDepth, segments);
         if(heightData.key === '4800,4800') {
             console.log('DISPLAY_AT: ', heightData.displayX, 0, heightData.displayY);
         }
@@ -385,12 +396,23 @@ function GameCanvas() {
         console.log('INITIALIZED MAP...');
         const scene = new THREE.Scene();
         const aspect = window.innerWidth / window.innerHeight;
+
+        scene.fog = new THREE.FogExp2(0xe0e0e0, 0.001); // Color, near, far
+
+// Add a directional light source to represent the sun
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1);
+        sunLight.position.set(1000, 1000, 1000); // Adjust position as needed
+        scene.add(sunLight);
+
+// Add ambient light to the scene with a light blue color
+        const ambientLight = new THREE.AmbientLight(0x87cefb, 0.5); // Soft blue light
+        scene.add(ambientLight);
         // const camera = new THREE.OrthographicCamera(-aspect * 10, aspect * 10, 10, -10, 1, 1000);
         const camera = new THREE.PerspectiveCamera(10, aspect, 0.1, 500);
         cameraRef.current = camera;
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setClearColor(0xe0e0e0); // Set a clear background color
+        renderer.setClearColor(0x80c0e0); // Set a clear background color
         mountRef.current.appendChild(renderer.domElement);
         rendererRef.current = renderer; // Store renderer in ref
         const gridHelper = new THREE.GridHelper(200, 50);
@@ -401,11 +423,11 @@ function GameCanvas() {
         const cameraHelper = new THREE.CameraHelper(camera);
         scene.add(cameraHelper);
 
-        const light = new THREE.AmbientLight(0xffffff, 0.5);
+/*        const light = new THREE.AmbientLight(0xffffff, 0.5);
         scene.add(light);
         const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
         directionalLight.position.set(0, 10, 0);
-        scene.add(directionalLight);
+        scene.add(directionalLight);*/
 
         onMessage('map-heights', (payload) => {
             const receivedKeys = new Set(payload.terrain.map(({ key }) => key));  // Keys from the payload
@@ -427,15 +449,41 @@ function GameCanvas() {
         });
 
         onMessage('selected-blob-data', payload => {
-            console.log('Selected blob: ', payload);
+            // console.log('Selected blob: ', payload);
             setSelectedBlobData(payload);
         })
+
+
+        function logModelMetrics(scene, label) {
+            scene.traverse((object) => {
+                if (object instanceof THREE.Mesh) {
+                    const geometry = object.geometry;
+                    let vertices;
+                    if (geometry instanceof THREE.BufferGeometry) {
+                        // For BufferGeometry objects
+                        const positionAttribute = geometry.attributes.position;
+                        vertices = positionAttribute ? positionAttribute.count : 0;
+                    } else {
+                        console.warn(`${label}: Unsupported geometry type for ${object.name}`);
+                        return;
+                    }
+
+                    const faces = geometry.index ? geometry.index.count / 3 : 0;
+                    const triangles = faces * 3; // Each face consists of 3 vertices
+
+                    console.log(`${label}: Model: ${object.name}`);
+                    console.log(`- Vertices: ${vertices}`);
+                    console.log(`- Faces: ${faces}`);
+                    console.log(`- Triangles: ${triangles}`);
+                }
+            });
+        }
 
 
         function preloadAssets() {
             const loader = new GLTFLoader();
             const textureLoader = new THREE.TextureLoader();
-            const assetsToLoad = 5; // Adjust based on number of assets
+            const assetsToLoad = 11; // Adjust based on number of assets
             let loadedAssets = 0;
 
             // Function to check if all assets are loaded
@@ -452,6 +500,7 @@ function GameCanvas() {
             loader.load('models/food-v2.glb', function (gltf) {
                 foodRef.current.model = gltf.scene;
                 console.log('Food model loaded');
+                //logModelMetrics(gltf.scene, 'food');
                 assetLoaded(); // Mark this asset as loaded
             }, undefined, function (error) {
                 console.error('Error loading GLB model:', error);
@@ -460,6 +509,7 @@ function GameCanvas() {
             loader.load('models/tree-v2.glb', function (gltf) {
                 treeRef.current.models.model = gltf.scene;
                 console.log('Tree model loaded');
+                //logModelMetrics(gltf.scene, 'tree-v2');
                 assetLoaded(); // Mark this asset as loaded
             }, undefined, function (error) {
                 console.error('Error loading GLB model:', error);
@@ -468,6 +518,7 @@ function GameCanvas() {
             loader.load('models/tree-v3.glb', function (gltf) {
                 treeRef.current.models.modelv2 = gltf.scene;
                 console.log('Tree v2 model loaded');
+                //logModelMetrics(gltf.scene, 'tree-v3');
                 assetLoaded(); // Mark this asset as loaded
             }, undefined, function (error) {
                 console.error('Error loading GLB model:', error);
@@ -476,6 +527,65 @@ function GameCanvas() {
             loader.load('models/tree-v4.glb', function (gltf) {
                 treeRef.current.models.modelv3 = gltf.scene;
                 console.log('Tree v3 model loaded', treeRef.current);
+                //logModelMetrics(gltf.scene, 'tree-v4');
+                assetLoaded(); // Mark this asset as loaded
+            }, undefined, function (error) {
+                console.error('Error loading GLB model:', error);
+            });
+
+            loader.load('models/trinkets-v1-min4.glb', function (gltf) {
+                decorsRef.current.models.modelv1 = gltf.scene;
+                console.log('Decor v1 model loaded');
+                //logModelMetrics(gltf.scene, 'trinkets-v1');
+                assetLoaded(); // Mark this asset as loaded
+            }, undefined, function (error) {
+                console.error('Error loading GLB model:', error);
+            });
+
+            loader.load('models/trinkets-v2-min4.glb', function (gltf) {
+                decorsRef.current.models.modelv2 = gltf.scene;
+                console.log('Decor v2 model loaded');
+                //logModelMetrics(gltf.scene, 'trinkets-v2');
+                assetLoaded(); // Mark this asset as loaded
+            }, undefined, function (error) {
+                console.error('Error loading GLB model:', error);
+            });
+
+            loader.load('models/flora-v3-min4.glb', function (gltf) {
+                decorsRef.current.models.modelv3 = gltf.scene;
+                console.log('Decor v3 model loaded');
+                //logModelMetrics(gltf.scene, 'flora-v3');
+                assetLoaded(); // Mark this asset as loaded
+            }, undefined, function (error) {
+                console.error('Error loading GLB model:', error);
+            });
+
+            loader.load('models/flora-v4-min4.glb', function (gltf) {
+                decorsRef.current.models.modelv4 = gltf.scene;
+                console.log('Decor v4 model loaded');
+                //logModelMetrics(gltf.scene, 'flora-v4');
+                assetLoaded(); // Mark this asset as loaded
+            }, undefined, function (error) {
+                console.error('Error loading GLB model:', error);
+            });
+
+
+            loader.load('models/flora-v5-min4.glb', function (gltf) {
+                decorsRef.current.models.modelv5 = gltf.scene;
+                console.log('Decor v5 model loaded');
+                //logModelMetrics(gltf.scene, 'flora-v5');
+                assetLoaded(); // Mark this asset as loaded
+            }, undefined, function (error) {
+                console.error('Error loading GLB model:', error);
+            });
+
+            loader.load('models/flora-v6-min4.glb', function (gltf) {
+                const simplified = gltf.scene.clone();
+                // simplifyModel(simplified, 0.5);
+                // console.log('Decor v6 model loaded');
+                logModelMetrics(gltf.scene, 'flora-v6');
+                // logModelMetrics(simplified, 'flora-v6-simplified');
+                decorsRef.current.models.modelv6 = gltf.scene;
                 assetLoaded(); // Mark this asset as loaded
             }, undefined, function (error) {
                 console.error('Error loading GLB model:', error);
@@ -504,25 +614,9 @@ function GameCanvas() {
                     animations: gltf.animations
                 };
 
+                logModelMetrics(gltf.scene);
 
 
-                /*scene.add(gltf.scene);
-
-                // If using animations
-                const mixer = new THREE.AnimationMixer(gltf.scene);
-                gltf.animations.forEach((clip) => {
-                    mixer.clipAction(clip).play();
-                });
-
-                const blobMesh = SkeletonUtils.clone(gltf.scene);
-                blobMesh.userData = {
-                    id: 100500,
-                }
-                scene.add(blobMesh);
-                blobMesh.scale.set(2,2,2);
-                blobMesh.position.set(20,2,20);
-                blobMesh.updateMatrixWorld(true);*/
-                // animate();
                 console.log("Blob model and animations loaded", blobModelRef.current);
                 assetLoaded();
 
@@ -727,6 +821,64 @@ function GameCanvas() {
         });
 
 
+        onMessage('decorations-coordinates', payload => {
+            console.log('received-decorations: ', payload.decorations);
+
+            const newDecorationIDs = new Set();
+            // Process received trees and update or create new ones
+            payload.decorations.forEach(decorItem => {
+                newDecorationIDs.add(decorItem.id);
+                // pendingObjectPlacements.current.trees.push(decorItem);
+                let decorMesh = decorsRef.current.instances[decorItem.id];
+                if (!decorMesh) {
+                    // Create new tree mesh
+                    if(decorItem.type === 0) {
+                        decorMesh = decorsRef.current.models.modelv1.clone();
+                        decorMesh.scale.set(2,2,2);
+                    } else if(decorItem.type === 1) {
+                        decorMesh = decorsRef.current.models.modelv2.clone();
+                    } else if(decorItem.type === 2) {
+                        decorMesh = decorsRef.current.models.modelv3.clone();
+                        decorMesh.scale.set(3,3,3);
+                    } else if(decorItem.type === 3) {
+                        decorMesh = decorsRef.current.models.modelv4.clone();
+                    } else if(decorItem.type === 4) {
+                        decorMesh = decorsRef.current.models.modelv5.clone();
+                        decorMesh.scale.set(2,2,2);
+                    } else if(decorItem.type === 5) {
+                        decorMesh = decorsRef.current.models.modelv6.clone();
+                        decorMesh.scale.set(2,2,2);
+                    }
+
+                    // const y = getYPosition(decorItem.displayX, decorItem.displayY);
+                    decorMesh.position.set(decorItem.displayX, decorItem.displayZ, decorItem.displayY);
+                    decorMesh.rotation.y = decorItem.angle;
+                    decorMesh.userData = { id: decorItem.id };
+                    decorMesh.frustumCulled = true;
+
+                    // console.log('decorMesh: ', decorMesh);
+                    scene.add(decorMesh);
+                    decorsRef.current.instances[decorItem.id] = decorMesh;
+                } /*else {
+                    // Update existing tree
+                    decorMesh.position.set(decorItem.displayX, 0, decorItem.displayY);
+                    decorMesh.rotation.y = decorItem.angle;
+                }*/
+            });
+
+            currentDecorationIDs.forEach(id => {
+                if (!newDecorationIDs.has(id)) {
+                    const decorMesh = decorsRef.current.instances[id];
+                    if (decorMesh) {
+                        disposeHierarchy(decorMesh, true);
+                        delete decorsRef.current.instances[id];
+                    }
+                }
+            })
+
+            currentDecorationIDs.clear();
+            newDecorationIDs.forEach(id => currentDecorationIDs.add(id));
+        });
 
 
         function animate() {
@@ -750,10 +902,9 @@ function GameCanvas() {
 
         setCameraSettings({
             position: { x: 0, y: 100, z: 100 },
-            target: { x: 0, y: getYPosition(0, 0), z: 0 }
+            target: { x: 0, y: getYPosition(0, 0), z: 0 },
+            zoom: 0.5
         });
-
-        setZoom(0.5);
 
         animate();
 
@@ -766,17 +917,12 @@ function GameCanvas() {
     }, [mapData]);
 
     function updateCamera() {
-        /*if (!cameraRef.current) return;
-        const { position, target } = cameraSettings;
-        cameraRef.current.position.set(position.x, position.y, position.z);
-        cameraRef.current.lookAt(new THREE.Vector3(target.x, target.y, target.z));
-        cameraRef.current.zoom = zoom;
-        cameraRef.current.updateProjectionMatrix();*/
+
 
         if (cameraRef.current && cameraSettings.position && cameraSettings.target) {
             cameraRef.current.position.set(cameraSettings.position.x, cameraSettings.position.y, cameraSettings.position.z);
             cameraRef.current.lookAt(new THREE.Vector3(cameraSettings.target.x, cameraSettings.target.y, cameraSettings.target.z));
-            cameraRef.current.zoom = zoom;
+            cameraRef.current.zoom = cameraSettings.zoom;
             cameraRef.current.updateProjectionMatrix();
         }
     }
@@ -810,7 +956,7 @@ function GameCanvas() {
         cameraSettings.position.x = blob.position.x + offsets.x;
         cameraSettings.position.y = blob.position.y + offsets.y;*/
 
-        setCameraSettings(() => {
+        setCameraSettings((prev) => {
             return {
                 target: {
                     x: blob.position.x,
@@ -821,7 +967,8 @@ function GameCanvas() {
                     x: blob.position.x + offsets.x,
                     y: blob.position.y + offsets.y,
                     z: blob.position.z + offsets.z
-                }
+                },
+                zoom: prev.zoom
             }
         })
 
@@ -835,7 +982,7 @@ function GameCanvas() {
         /*camera.position.copy(blob.position).add(offset);
         camera.lookAt(blob.position.clone().add(direction));*/
         // console.log('blob: ', blob);
-        setCameraSettings({
+        setCameraSettings(prev => ({
             position: {
                 x: blob.position.x + Math.cos(blob.userData.angle),
                 y: 1,
@@ -845,8 +992,9 @@ function GameCanvas() {
                 x: blob.position.x + 2*Math.cos(blob.userData.angle),
                 y: 1,
                 z: blob.position.z + 2*Math.sin(blob.userData.angle)
-            }
-        })
+            },
+            zoom: prev.zoom,
+        }));
 
        /* console.log('chngCam: ', {
             position: {
@@ -871,11 +1019,11 @@ function GameCanvas() {
             cameraSettingsRef.current.position.x - cameraSettingsRef.current.target.x
         );
 
-        console.log("Angle Phi in degrees:",
+        /*console.log("Angle Phi in degrees:",
             phi * 180 / Math.PI,
             cameraSettingsRef.current.position.z - cameraSettingsRef.current.target.z,
             cameraSettingsRef.current.position.x - cameraSettingsRef.current.target.x
-        );
+        );*/
 
         // Calculate the new positions based on the camera's orientation
         /*const drX = dX * Math.cos(phi) - dZ * Math.sin(phi);
@@ -883,13 +1031,14 @@ function GameCanvas() {
         const drX = dX * Math.sin(phi) + dZ * Math.cos(phi);
         const drZ = -dX * Math.cos(phi) + dZ * Math.sin(phi);
 
-        console.log("dX, dZ:", dX, dZ);
-        console.log("drX, drZ:", drX, drZ);
+        // console.log("dX, dZ:", dX, dZ);
+        // console.log("drX, drZ:", drX, drZ);
 
         // Apply the calculated positional changes to the camera settings
         setCameraSettings(prev => ({
             position: { ...prev.position, x: prev.position.x + drX, z: prev.position.z + drZ },
-            target: { ...prev.target, x: prev.target.x + drX, z: prev.target.z + drZ, y: getYPosition(prev.target.x + drX, prev.target.z + drZ, true) }
+            target: { ...prev.target, x: prev.target.x + drX, z: prev.target.z + drZ, y: getYPosition(prev.target.x + drX, prev.target.z + drZ, true) },
+            zoom: prev.zoom
         }));
     }, [cameraSettings.target, cameraSettings.position]);
 
@@ -901,31 +1050,65 @@ function GameCanvas() {
 
     // Button handlers for camera controls
     function handleZoomIn() {
-        setZoom(zoom => zoom * 1.1);
+        setCameraSettings(prev => ({...prev, zoom: prev.zoom * 1.1}));
     }
 
     function handleZoomOut() {
-        setZoom(zoom => Math.max(0.25, zoom * 0.9));
+        setCameraSettings(prev => ({...prev, zoom: Math.max(0.25, prev.zoom * 0.9)}));
     }
 
-    /*function moveCamera(dx, dy) {
-        setCameraSettings(prev => ({
-            position: {
-                x: prev.position.x + dx,
-                y: prev.position.y,
-                z: prev.position.z + dy
-            },
-            target: {
-                x: prev.target.x + dx,
-                y: prev.target.y,
-                z: prev.target.z + dy
+    function saveGame() {
+        sendData('save-game', {});
+    }
+
+    function loadGame() {
+        sendData('load-game', JSON.parse(window.localStorage.getItem('game')));
+    }
+
+    onMessage('game-loaded', (data) => {
+        console.log('game-loaded: ', data);
+        // need to free all resources dedicated to blobs/trees/decors, and send init-map event
+        for (const blobId in blobsRef.current.instances) {
+            const blobMesh = blobsRef.current.instances[blobId];
+            if (blobMesh) {
+                disposeHierarchy(blobMesh, true);
             }
-        }));
-    }*/
+        }
+        blobsRef.current = {};
+
+        // Free all resources dedicated to trees
+        for (const treeId in treeRef.current.instances) {
+            const treeMesh = treeRef.current.instances[treeId];
+            if (treeMesh) {
+                disposeHierarchy(treeMesh, true);
+            }
+        }
+        treeRef.current.instances = {};
+
+        // Free all resources dedicated to decorations
+        for (const decorId in decorsRef.current.instances) {
+            const decorMesh = decorsRef.current.instances[decorId];
+            if (decorMesh) {
+                disposeHierarchy(decorMesh, true);
+            }
+        }
+
+        // Free terrain also
+        for (const chunkId in terrainChunks.current) {
+            const chunk = terrainChunks.current[chunkId];
+            if (chunk) {
+                disposeHierarchy(chunk, true);
+            }
+        }
+
+        terrainChunks.current = {};
+
+        sendData('init-map', {});
+    })
 
     useEffect(() => {
         updateCamera();
-    }, [zoom, cameraSettings]);
+    }, [cameraSettings]);
 
     useEffect(() => {
         isFollowRef.current = isFollow;  // Update ref whenever isFollow changes
@@ -968,9 +1151,12 @@ function GameCanvas() {
             <p>Eaten: {totalStats.foodEaten}</p>
             <p>Grown: {totalStats.foodGrown}</p>
         </div>
+        <div className={'minimap-holder'}>
+            <MiniMap size={120} />
+        </div>
         <div className={'boxes transparent-buttons'}>
-            <button onClick={handleZoomIn}>Zoom In</button>
-            <button onClick={handleZoomOut}>Zoom Out</button>
+            <button onClick={saveGame}>Save game</button>
+            <button onClick={loadGame}>Load game</button>
             <button onClick={() => moveXZ(5, 0)}>Move Right</button>
             <button onClick={() => moveXZ(-5, 0)}>Move Left</button>
             <button onClick={() => moveXZ(0, -5)}>Move Forward</button>

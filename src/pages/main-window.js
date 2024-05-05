@@ -13,6 +13,10 @@ export const MainWindow = () => {
         onMessage('initialized', (pl) => {
             console.log('initialized succesfully: ', pl);
             setGameLoaded(true)
+        });
+        onMessage('game-saved', pl => {
+            console.log('game saved: ', pl);
+            window.localStorage.setItem('game', JSON.stringify(pl));
         })
     }, []);
 

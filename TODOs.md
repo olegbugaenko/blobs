@@ -9,3 +9,9 @@ v0.0.-100499
 1. height maps should be initialized always first
 2. Easy animation attempt
 3. Blobs breeding
+
+v0.0.-100498
+1. Send camera zoom to worker, and make it impacting on distances
+2. Implement LOD at least for trees
+3. Add stats of reasons for blobs death
+4. PerkClass - some class, imitating some perks, that I can run some tests for survivability

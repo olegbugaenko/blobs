@@ -6,6 +6,7 @@ export class MapViewport extends GameModule {
     position;
     map;
     staticsToSend = {};
+    shouldRegenerateSeeded = false;
 
     constructor() {
         if(MapViewport.instance) {
@@ -24,7 +25,9 @@ export class MapViewport extends GameModule {
                 trees: true,
                 food: true,
                 terrain: true,
+                decorations: true,
             }
+            this.shouldRegenerateSeeded = true;
         })
         this.eventHandler.registerHandler('assets-loaded', payload => {
             this.isUIReady = true;
@@ -33,6 +36,7 @@ export class MapViewport extends GameModule {
                 food: true,
                 terrain: true,
             }
+            this.shouldRegenerateSeeded = true;
         })
     }
 
@@ -41,6 +45,7 @@ export class MapViewport extends GameModule {
         this.staticsToSend = {
 
         }
+        this.shouldRegenerateSeeded = false;
     }
 
     checkVisibility(object) {
@@ -51,24 +56,38 @@ export class MapViewport extends GameModule {
         const cameraPosition = this.position.position;
         const cameraTarget = this.position.target;
 
-        const dx = object.x - cameraPosition.x - this.map.width / 2;
-        const dy = object.y - cameraPosition.z - this.map.height / 2;
+        const dx = object.x - cameraTarget.x - this.map.width / 2;
+        const dy = object.y - cameraTarget.z - this.map.height / 2;
         const distance = Math.sqrt(dx * dx + dy * dy);
         return distance <= MAX_DISTANCE;
     }
 
-    filterVisible(objects, thsh = 500) {
+    getCameraCoords() {
+        if(!this.position?.target) {
+            return {
+                x: this.map.width / 2,
+                y: this.map.height / 2
+            }
+        }
+        return {
+            x: this.position?.target.x + this.map.width / 2,
+            y: this.position?.target.z + this.map.height / 2
+        }
+    }
+
+    filterVisible(objects, thsh = 500, mult = 1) {
         const MAX_DISTANCE = thsh;
+        const rdist = Math.min(MAX_DISTANCE, 50*mult / this.position.zoom);
         if(!this.position || !this.map) {
             return [];
         }
         const cameraPosition = this.position.position;
         const cameraTarget = this.position.target;
         return objects.filter(object => {
-            const dx = object.x - cameraPosition.x - this.map.width / 2;
-            const dy = object.y - cameraPosition.z - this.map.height / 2;
+            const dx = object.x - cameraTarget.x - this.map.width / 2;
+            const dy = object.y - cameraTarget.z - this.map.height / 2;
             const distance = Math.sqrt(dx * dx + dy * dy);
-            return distance <= MAX_DISTANCE;
+            return distance <= rdist;
         })
     }
 
@@ -76,8 +95,22 @@ export class MapViewport extends GameModule {
         this.staticsToSend[key] = false;
     }
 
+    setSeededRegenerated() {
+        this.shouldRegenerateSeeded = false;
+    }
+
     shouldSend(key) {
         return this.staticsToSend[key];
+    }
+
+    saveView() {
+        return {
+            camera: this.position,
+        }
+    }
+
+    loadView(obj) {
+        this.position = obj.camera;
     }
 
 }
