@@ -77,13 +77,15 @@ export class Tree extends GameModule {
     }
 
     displayTrees() {
-        const trees = Object.values(this.trees);
         const viewPort = new MapViewport();
-        const gameMap = this.gameMap;
-        const treesArr = viewPort.filterVisible(trees, 200, 0.5);
+
         // console.log('VTREE: ', trees, treesArr);
         // if(!)
         if(viewPort.shouldSend('trees')) {
+            const trees = Object.values(this.trees);
+
+            const gameMap = this.gameMap;
+            const treesArr = viewPort.filterVisible(trees, 300, 1);
             this.eventHandler.sendData('tree-coordinates', { trees: treesArr.map(tree => ({
                     ...tree,
                     displayX: tree.x - this.map.width / 2,

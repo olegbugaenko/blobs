@@ -47,13 +47,13 @@ export class GameMap extends GameModule {
             this.generateHeights();
             console.log('Heights generated', this.map.heightsData);
             const mapSize = this.map.width * this.map.height;
-            new Grid().init(10, this.map.width, this.map.height);
+            new Grid().init(25, this.map.width, this.map.height);
             this.mapViewport.init(this.map);
             console.log('Map initialized: ', payload);
             this.postMap();
             if(isNewMap) {
                 this.blobs.seedLife(10, this.map);
-                this.food.seedFood(mapSize / 1000, this.map);
+                this.food.seedFood(mapSize / 3000, this.map);
             } else {
                 console.log('Using values from previously loaded map');
             }
@@ -180,13 +180,14 @@ export class GameMap extends GameModule {
 
     displayTerrain() {
         if(!this.map.heightsData) return;
-        const terrainChunks = Object.values(this.map.heightsData);
         const viewPort = new MapViewport();
-        const terrainArr = viewPort.filterVisible(terrainChunks, 1000, 4);
 
         // if(!)
 
         if(viewPort.shouldSend('terrain')) {
+            const terrainChunks = Object.values(this.map.heightsData);
+
+            const terrainArr = viewPort.filterVisible(terrainChunks, 1000, 2);
             this.eventHandler.sendData('map-heights', { terrain: terrainArr.map(terrain => ({
                     ...terrain,
                     displayX: terrain.x - this.map.width / 2,
@@ -203,15 +204,20 @@ export class GameMap extends GameModule {
             this.blobs.tick(dT);
             this.tree.tick(dT);
             this.food.tick(dT);
+
         }
     }
 
     process(dT) {
         if(this.map) {
+            const now = performance.now();
             this.blobs.process(dT);
             this.food.process(dT);
             this.decorations.process(dT);
             this.displayTerrain();
+            const n2 = performance.now();
+            console.log('TTP: ', n2 - now);
+
             const minimap = this.grid.generateMiniMap(100, this.mapViewport.position?.target);
             this.eventHandler.sendData('minimap', minimap);
         }

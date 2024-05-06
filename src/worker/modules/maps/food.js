@@ -28,9 +28,13 @@ export class Food extends GameModule {
         this.foodGrown = 0;
     }
 
+    foodExists(id) {
+        return this.food[id] ? true : false;
+    }
+
     seedFood(amount, map) {
         this.map = map;
-        this.food = Array.from({length: amount}, (_, id) => {
+        const foods = Array.from({length: amount}, (_, id) => {
             const angle = Math.random() * 2 * Math.PI; // Random angle in radians
             return {
                 id,
@@ -40,17 +44,32 @@ export class Food extends GameModule {
                 type: '',
                 amount: 200
             };
-        }).reduce((acc, item) => { acc[item.id] = item; return acc}, {});
+        });
 
-        Object.values(this.food).forEach(food => {
-            new Grid().addFood(food);
+        foods.forEach(food => this.addFood(food));
+        let totals = 0;
+        let adjacents = 0;
+        let totalFoods = 0;
+        let totalCells = 0;
+        new Grid().cells.forEach(column => {
+            column.forEach(cell => {
+                totalCells++;
+                totalFoods += cell.food.length;
+                adjacents += cell.adjacentFood;
+                if(cell.adjacentFood <= 0) {
+                    totals += 1;
+                }
+            })
         })
+        console.log('AGI: Cells with poor food found: ', totals, this.food);
+        console.log('AGI: Total cells: ', totalCells, totalFoods, adjacents);
 
     }
 
     addFood(food) {
         this.food[food.id] = food;
         new Grid().addFood(food);
+        new Grid().foodAmt = (new Grid().foodAmt || 0) + 1;
     }
 
     generateFood(x, y, amount, type) {
@@ -68,6 +87,33 @@ export class Food extends GameModule {
         this.foodGrown++;
     }
 
+    generateWherePoor(amount, type) {
+        const cellsPoorFood = [];
+        let totals = 0;
+        let adjacents = 0;
+        let totalFoods = 0;
+        let totalCells = 0;
+        new Grid().cells.forEach(column => {
+            column.forEach(cell => {
+                totalCells++;
+                totalFoods += cell.food.length;
+                adjacents += cell.adjacentFood;
+                if(cell.adjacentFood <= 0) {
+                    totals += 1;
+                    cellsPoorFood.push(cell);
+                }
+            })
+        })
+        console.log('Cells with poor food found: ', cellsPoorFood.length, totals);
+        console.log('Total cells: ', totalCells, totalFoods, adjacents);
+        const cellToGenerate = cellsPoorFood[Math.floor(Math.random()*(cellsPoorFood.length-0.001))];
+        if(cellToGenerate) {
+            console.log('cellToGenerate', cellToGenerate);
+            const {x,y} = (new Grid()).randomCellCoordinates(cellToGenerate);
+            this.generateFood(x,y,amount,type);
+        }
+    }
+
     removeFood(id) {
         new Grid().removeFood(this.food[id]);
         delete this.food[id];
@@ -80,7 +126,7 @@ export class Food extends GameModule {
 
     searchClosestFood(x, y, range) {
         const foodNearby = (new Grid()).getNearbyFood(x, y, range);
-        let maxDistance = 1000;
+        let maxDistance = range;
         let closestFood = null;
         foodNearby.forEach(foodId => {
             const item = this.food[foodId];
@@ -90,6 +136,9 @@ export class Food extends GameModule {
                 closestFood = item;
             }
         });
+        if(maxDistance > range) {
+            return null;
+        }
         return closestFood;
     }
 
@@ -98,30 +147,33 @@ export class Food extends GameModule {
 
     }
 
+    eatFood(food, amt) {
+        food.amount -= amt;
+        if(food.amount <= 0) {
+            this.foodDrain(food.id)
+        }
+    }
+
     process(dT) {
-        Object.values(this.food).forEach(food => {
-            if(food.amount <= 0) {
-                this.foodDrain(food.id)
-            }
-        });
 
         if(this.selectedFood) {
             this.eventHandler.sendData('selected-food-data', this.dataToDisplay(this.selectedFood));
         }
 
         // randomly add
-        const chance = dT*0.1;
+        const chance = dT*this.gameMap.map.width*this.gameMap.map.height / 5000000000;
 
         if(Math.random() < chance) {
-            this.generateFood(this.map.width*Math.random(), this.map.height*Math.random(),200, '');
+            this.generateWherePoor(200, '');
         }
 
         this.displayFood();
     }
 
     displayFood() {
-        const foods = Object.values(this.food);
+
         const viewPort = new MapViewport();
+        const foods = Object.values(this.food);
         const foodArr = viewPort.filterVisible(foods);
 
         if(!viewPort.isUIReady) return;

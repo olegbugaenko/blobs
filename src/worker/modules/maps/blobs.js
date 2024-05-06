@@ -2,6 +2,7 @@ import {GameModule} from "../../shared/game-module";
 import {Grid} from "./grid.js";
 import {Main} from "../main/main";
 import {MapViewport} from "./map-viewport";
+import {BlobAttributes} from "../blobs/blob-attrinutes";
 
 export class Blobs extends GameModule {
 
@@ -19,6 +20,7 @@ export class Blobs extends GameModule {
         this.nonVisibleBlobs = {};
         Blobs.instance = this;
         this.gameMap = gameMap;
+        this.blobAttributes = new BlobAttributes();
         this.eventHandler.registerHandler('select-blob', payload => {
             if(payload.id) {
                 this.selectedBlob = this.blobs[payload.id];
@@ -27,8 +29,13 @@ export class Blobs extends GameModule {
             }
             // this.eventHandler.sendData('selected-blob-data', this.dataToDisplay(this.selectedBlob));
         })
-        this.blobBorn = 0;
-        this.blobDied = 0;
+
+        this.additionalStats = {
+            blobDeathReasons: {},
+            blobBorn: 0,
+            blobDied: 0,
+            activityTimes: {}
+        }
     }
 
     seedLife(amount, map) {
@@ -36,7 +43,7 @@ export class Blobs extends GameModule {
         this.map = map;
         this.blobs = Array.from({length: amount}, (_, id) => {
             const angle = Math.random() * 2 * Math.PI; // Random angle in radians
-            const speed = 0.3 + 0.2 * Math.random();
+            const speed = this.blobAttributes.getAttribute('baseSpeed') + 0.2 * Math.random();
             return {
                 id,
                 speed,
@@ -45,9 +52,9 @@ export class Blobs extends GameModule {
                 dx: 0,
                 dy: 0,
                 angle,
-                age: 1 + Math.random(),
-                foodCapacity: 100,
-                food: 60 + Math.random()*40,
+                age: 1 + 0.5*Math.random(),
+                foodCapacity: this.blobAttributes.getAttribute('foodCapacity'),
+                food: this.blobAttributes.getAttribute('foodCapacity')*(0.6 + Math.random()*0.4),
                 sex: Math.floor(Math.random() * 2),
                 lastBreedTime: -Infinity,
                 isPregnant: false,
@@ -59,8 +66,12 @@ export class Blobs extends GameModule {
         })
     }
 
+    blobExists(id) {
+        return this.blobs[id] ? true : false;
+    }
+
     handleBlobDeathProbability(blob, dT) {
-        const BLOB_MAX_AGE = 2;
+        const BLOB_MAX_AGE = this.blobAttributes.getAttribute('maxAge');
         const factor = Math.max(0, blob.age - BLOB_MAX_AGE) / BLOB_MAX_AGE;
         /*if(blob.id === 1) {
             console.log('Blob die check', factor, dT, blob.age);
@@ -79,12 +90,13 @@ export class Blobs extends GameModule {
     blobDie(id, reason) {
         this.removeBlob(id);
         console.log('Blob died because of '+reason);
-        this.blobDied++;
+        this.additionalStats.blobDied++;
+        this.additionalStats.blobDeathReasons[reason] = (this.additionalStats.blobDeathReasons[reason] || 0) + 1
         // this.eventHandler.sendData('delete-blob', { id })
     }
 
     searchClosestFood(blob) {
-        const foodNearby = Main.instance.gameMap.food.searchClosestFood(blob.x, blob.y, 5);
+        const foodNearby = Main.instance.gameMap.food.searchClosestFood(blob.x, blob.y, this.blobAttributes.getAttribute('foodSearchRange'));
 
         if(foodNearby) {
             blob.closestFood = foodNearby;
@@ -188,9 +200,12 @@ export class Blobs extends GameModule {
         if (blob.food > blob.foodCapacity * 0.5 && (blob.age - blob.lastBreedTime > 0.5) && blob.age > 1) {
             blob.wantToBreed = true;
             blob.action = 'Look for partner';
+            if(blob.potentialPartner && !this.blobExists(blob.potentialPartner.id)) {
+                blob.potentialPartner = undefined;
+            }
             if(!blob.potentialPartner || blob.potentialPartner.wantToBreed == false) {
                 blob.potentialPartner = undefined;
-                const others = new Grid().getNearbyBlob(blob.x, blob.y, 6); // attempt to increase range for finding partner
+                const others = new Grid().getNearbyBlob(blob.x, blob.y, this.blobAttributes.getAttribute('breedSearchRange')); // attempt to increase range for finding partner
                 const potentialPartners = others
                     .map(o => this.blobs[o])
                     .filter(other => other && (other.sex !== blob.sex) && other.wantToBreed)
@@ -214,11 +229,11 @@ export class Blobs extends GameModule {
                     blob.potentialPartner.dy = 0;
                     if (blob.sex === 1) { // Female
                         blob.isPregnant = true;
-                        blob.pregnancyTime = 30; // days
+                        blob.pregnancyTime = this.blobAttributes.getAttribute('pregnancyDays'); // days
                     } else
                     if (blob.potentialPartner.sex === 1) { // Female
                         blob.potentialPartner.isPregnant = true;
-                        blob.potentialPartner.pregnancyTime = 30; // days
+                        blob.potentialPartner.pregnancyTime = this.blobAttributes.getAttribute('pregnancyDays'); // days
                     }
                     // Reset breeding timers
                     blob.lastBreedTime = blob.age;
@@ -251,20 +266,20 @@ export class Blobs extends GameModule {
     }
 
     spawnChildren(blob) {
-        const numChildren = Math.floor(Math.random() * 3) + 1; // 1 to 3 children
-        this.blobBorn += numChildren;
+        const numChildren = Math.floor(Math.random() * this.blobAttributes.getAttribute('maxChildren')) + 1; // 1 to 3 children
+        this.additionalStats.blobBorn += numChildren;
         for (let i = 0; i < numChildren; i++) {
             const child = {
                 id: `${Math.round(Math.random()*10000000)}`,
-                speed: 0.4 + 0.3 * Math.random(),
+                speed: this.blobAttributes.getAttribute('baseSpeed') + 0.2 * Math.random(),
                 x: blob.x + (Math.random() - 0.5) * 2,
                 y: blob.y + (Math.random() - 0.5) * 2,
                 dx: 0,
                 dy: 0,
                 angle: Math.random() * 2 * Math.PI,
                 age: 0,
-                foodCapacity: 100,
-                food: 100,
+                foodCapacity: this.blobAttributes.getAttribute('foodCapacity'),
+                food: this.blobAttributes.getAttribute('foodCapacity'),
                 sex: Math.floor(Math.random() * 2),
                 lastBreedTime: 0,
                 isPregnant: false,
@@ -277,6 +292,12 @@ export class Blobs extends GameModule {
     makeDecisions(blob, dT) {
         blob.action = 'Idle';
         blob.animation = '';
+        if(blob.eatingFood && !Main.instance.gameMap.food.foodExists(blob.eatingFood.id)) {
+            blob.eatingFood = undefined;
+        }
+        if(blob.closestFood && !Main.instance.gameMap.food.foodExists(blob.closestFood.id)) {
+            blob.closestFood = undefined;
+        }
         if(blob.eatingFood) {
             blob.action = 'Eating';
             blob.animation = 'Eat';
@@ -291,7 +312,7 @@ export class Blobs extends GameModule {
                 this.searchClosestFood(blob);
                 blob.action = 'Look for food';
                 if(!blob.closestFood) {
-                    console.log('Not found food nearby. Stranging...', blob);
+                    // console.log('Not found food nearby. Stranging...', blob);
                     this.moveRandomPoint(blob);
                 }
             }
@@ -300,7 +321,7 @@ export class Blobs extends GameModule {
             blob.closestFood = undefined;
         }
         if(blob.isHungry && !blob.eatingFood && blob.closestFood) {
-            blob.action = `Going to eat at ${blob.closestFood.x - this.map.width / 2}:${blob.closestFood.y - this.map.height / 2}`;
+            blob.action = `Going to eat`;
             const distance = Math.sqrt(
                 (blob.x - blob.closestFood.x) ** 2 +
                 (blob.y - blob.closestFood.y) ** 2
@@ -424,6 +445,8 @@ export class Blobs extends GameModule {
         this.nonVisibleBlobs = {};
         const vp = new MapViewport();
 
+        // const activities = this.additionalStats.activityTimes;
+
         blobArr.forEach(blob => {
             this.handleBlobDeathProbability(blob, dT);
             if(blob.food <= 0) {
@@ -439,14 +462,16 @@ export class Blobs extends GameModule {
                 this.moveBlob(blob, dT);
             }
             blob.age += (dT / (5 * 365));
-            blob.food -= dT / 5; // food consumption
+            blob.food -= dT * this.blobAttributes.getAttribute('foodConsumption'); // food consumption
 
             // logic to gather food or some other stuff
             this.makeDecisions(blob, dT);
+            this.additionalStats.activityTimes[blob.action] = (this.additionalStats.activityTimes[blob.action] || 0) + (dT / blobArr.length);
 
             if (blob.eatingFood) {
-                blob.food += 2 * dT;
-                blob.eatingFood.amount -= 2 * dT;
+                blob.food += this.blobAttributes.getAttribute('eatingSpeed') * dT;
+                Main.instance.gameMap.food.eatFood(blob.eatingFood, this.blobAttributes.getAttribute('eatingSpeed') * dT);
+                // blob.eatingFood.amount -= this.blobAttributes.getAttribute('eatingSpeed') * dT;
             }
             age += blob.age;
             if(blob.sex === 0) {
@@ -461,8 +486,7 @@ export class Blobs extends GameModule {
             averageAge: Math.round(100 * age / blobArr.length) / 100,
             totalMale: males,
             totalFemale: females,
-            born: this.blobBorn,
-            died: this.blobDied
+            ...this.additionalStats,
         });
         // console.log('process took: ', performance.now() - str);
     }
@@ -529,7 +553,10 @@ export class Blobs extends GameModule {
     }
 
     saveBlobs() {
-        const saveObject = {}
+        const saveObject = {
+            list: {},
+            stats: this.additionalStats,
+        }
         for(const key in this.blobs) {
             saveObject[key] = this.dataToSaveBlob(this.blobs[key]);
         }
@@ -541,8 +568,10 @@ export class Blobs extends GameModule {
             this.removeBlob(id);
         });
 
-        Object.values(saveObject).forEach(blob => {
+        Object.values(saveObject.list).forEach(blob => {
             this.addBlob(blob);
         })
+
+        this.additionalStats = saveObject.stats;
     }
 }

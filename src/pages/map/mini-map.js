@@ -39,7 +39,7 @@ export const MiniMap = ({ size }) => {
 
     useEffect(() => {
         onMessage('minimap', (minimap) => {
-            console.log('minimap', minimap.totalBlobs);
+            // console.log('minimap', minimap.totalBlobs);
             setCurrentMinimap(minimap);
             draw(minimap); // Draw on canvas when mini-map data is received
         });

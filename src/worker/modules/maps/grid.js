@@ -8,7 +8,7 @@ export class Grid extends GameModule {
         }
         super();
         Grid.instance = this;
-
+        this.foodAmt = 0;
     }
 
     init(cellSize, width, height) {
@@ -16,8 +16,9 @@ export class Grid extends GameModule {
         this.numCols = width / cellSize;
         this.numRows = height / cellSize;
         this.cells = Array.from({ length: Math.ceil(width / cellSize) }, (item, col) =>
-            Array.from({ length: Math.ceil(height / cellSize) }, (it2, row) => ({ col, row, blobs: [], food: [], trees: [], decorations: [] }))
+            Array.from({ length: Math.ceil(height / cellSize) }, (it2, row) => ({ col, row, blobs: [], food: [], trees: [], decorations: [], adjacentFood: 0 }))
         );
+        console.log('Grid-initialized');
     }
 
     addBlob(blob) {
@@ -32,6 +33,8 @@ export class Grid extends GameModule {
         const cell = this.getCell(x, y);
         cell.food.push(id);
         food.cell = cell;
+        this.getNearbyCells(x,y,1).forEach(cellI => cellI.adjacentFood = cellI.adjacentFood + 1);
+        // console.log('Food added to grid: ', food, this.foodAmt);
     }
 
     addTree(tree) {
@@ -59,6 +62,7 @@ export class Grid extends GameModule {
         const { x, y, id } = food;
         const cell = this.getCell(x, y);
         cell.food = cell.food.filter(foodId => foodId !== id);
+        this.getNearbyCells(x,y,1).forEach(cellI => cellI.adjacentFood--);
     }
 
     removeTree(tree) {
@@ -75,6 +79,21 @@ export class Grid extends GameModule {
 
     clearCellDecorations(cell) {
         cell.decorations = [];
+    }
+
+    getCellX(cell) {
+        return cell.col * this.cellSize;
+    }
+
+    getCellY(cell) {
+        return cell.row * this.cellSize;
+    }
+
+    randomCellCoordinates(cell) {
+        return {
+            x: this.cellSize*(cell.col + Math.random()),
+            y: this.cellSize*(cell.row + Math.random()),
+        }
     }
 
     moveBlob(blob) {
@@ -114,10 +133,11 @@ export class Grid extends GameModule {
     // To find nearby food
     getNearbyFood(x, y, range) {
         const nearby = [];
+        const cellOffset = Math.ceil(range / this.cellSize);
         const baseCol = Math.floor(x / this.cellSize);
         const baseRow = Math.floor(y / this.cellSize);
-        for (let dx = -range; dx <= range; dx++) {
-            for (let dy = -range; dy <= range; dy++) {
+        for (let dx = -cellOffset; dx <= cellOffset; dx++) {
+            for (let dy = -cellOffset; dy <= cellOffset; dy++) {
                 const col = baseCol + dx;
                 const row = baseRow + dy;
                 if (col >= 0 && col < this.cells.length && row >= 0 && row < this.cells[col].length) {
@@ -130,10 +150,11 @@ export class Grid extends GameModule {
 
     getNearbyBlob(x, y, range) {
         const nearby = [];
+        const cellOffset = Math.ceil(range / this.cellSize);
         const baseCol = Math.floor(x / this.cellSize);
         const baseRow = Math.floor(y / this.cellSize);
-        for (let dx = -range; dx <= range; dx++) {
-            for (let dy = -range; dy <= range; dy++) {
+        for (let dx = -cellOffset; dx <= cellOffset; dx++) {
+            for (let dy = -cellOffset; dy <= cellOffset; dy++) {
                 const col = baseCol + dx;
                 const row = baseRow + dy;
                 if (col >= 0 && col < this.cells.length && row >= 0 && row < this.cells[col].length) {
@@ -146,10 +167,11 @@ export class Grid extends GameModule {
 
     getNearbyTree(x, y, range) {
         const nearby = [];
+        const cellOffset = Math.ceil(range / this.cellSize);
         const baseCol = Math.floor(x / this.cellSize);
         const baseRow = Math.floor(y / this.cellSize);
-        for (let dx = -range; dx <= range; dx++) {
-            for (let dy = -range; dy <= range; dy++) {
+        for (let dx = -cellOffset; dx <= cellOffset; dx++) {
+            for (let dy = -cellOffset; dy <= cellOffset; dy++) {
                 const col = baseCol + dx;
                 const row = baseRow + dy;
                 if (col >= 0 && col < this.cells.length && row >= 0 && row < this.cells[col].length) {
@@ -185,7 +207,7 @@ export class Grid extends GameModule {
                 const col = baseCol + dx;
                 const row = baseRow + dy;
                 if (col >= 0 && col < this.cells.length && row >= 0 && row < this.cells[col].length) {
-                    nearby.push({ row, col, decorations: this.cells[col][row].decorations });
+                    nearby.push(this.cells[col][row]);
                 }
             }
         }

@@ -1,7 +1,5 @@
-import logo from './logo.svg';
 import './App.css';
 import { useEffect, useState } from "react";
-import GameCanvas from "./pages/map/map-canvas";
 import WorkerContext from "./context/worker-context";
 import * as WorkerModule from './worker/main.worker.js';
 import {MainWindow} from "./pages/main-window";

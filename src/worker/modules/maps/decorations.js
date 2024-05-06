@@ -56,7 +56,7 @@ export class Decorations extends GameModule {
         const rand = new SeededRandom(seed);
         const objects = [];
         const count = rand.nextInt(0, 1); // Random number of objects
-        console.log('Amount to generate: ', count, rand.seed);
+        // console.log('Amount to generate: ', count, rand.seed);
 
         for (let i = 0; i < count; i++) {
             const localX = rand.nextDouble() * this.grid.cellSize;

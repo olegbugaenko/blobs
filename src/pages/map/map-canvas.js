@@ -4,11 +4,11 @@ import * as THREE from 'three';
 import {useWorkerClient} from "../../general/client";
 import {BlobDetails} from "./blob-details";
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { SimplifyModifier } from 'three/examples/jsm/modifiers/SimplifyModifier.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import {disposeHierarchy} from "../../helpers/web-gl.helper";
-import {debounce} from "../../helpers/utils.helper";
+import {throttle} from "../../helpers/utils.helper";
 import {MiniMap} from "./mini-map";
+import {BlobStats} from "./blob-stats";
 
 
 function GameCanvas() {
@@ -207,7 +207,7 @@ function GameCanvas() {
 
     useEffect(() => {
         cameraSettingsRef.current = cameraSettings;
-        debounce(sendData, 500)('camera-position', cameraSettingsRef.current);
+        throttle(sendData, 500)('camera-position', cameraSettingsRef.current);
         // console.log('dbc: ', cameraSettings);
         // sendData('camera-position', cameraSettingsRef.current);
     }, [cameraSettings]);
@@ -345,6 +345,7 @@ function GameCanvas() {
         const material = new THREE.MeshLambertMaterial(params);
         const mesh = new THREE.Mesh(geometry, material);
 
+
         // Position the mesh according to its key
 
         mesh.position.set(heightData.displayX, 0, heightData.displayY);
@@ -431,7 +432,7 @@ function GameCanvas() {
 
         onMessage('map-heights', (payload) => {
             const receivedKeys = new Set(payload.terrain.map(({ key }) => key));  // Keys from the payload
-            console.log('payload.terrain: ', payload.terrain, mapData);
+            console.log('payload.terrain: ', payload.terrain.length, mapData);
 
             // Generate new or update existing chunks
             payload.terrain.forEach((chunk) => {
@@ -506,11 +507,22 @@ function GameCanvas() {
                 console.error('Error loading GLB model:', error);
             });
 
-            loader.load('models/tree-v2.glb', function (gltf) {
-                treeRef.current.models.model = gltf.scene;
-                console.log('Tree model loaded');
-                //logModelMetrics(gltf.scene, 'tree-v2');
-                assetLoaded(); // Mark this asset as loaded
+            /*loader.load('models/tree-v2.glb', function (gltf) {
+                loader.load('models/tree-v2-min.glb', function (gltfMin) {
+                    const lod = new THREE.LOD();
+
+                    gltf.scene.matrixAutoUpdate = false;
+                    gltfMin.scene.matrixAutoUpdate = false;
+                    gltf.scene.updateMatrix();
+                    gltfMin.scene.updateMatrix();
+                    lod.addLevel(gltf.scene);
+                    lod.addLevel(gltfMin.scene, 100);
+                    treeRef.current.models.model = lod;
+                    console.log('Tree model loaded');
+                    //logModelMetrics(gltf.scene, 'tree-v2');
+                    assetLoaded(); // Mark this asset as loaded
+                })
+
             }, undefined, function (error) {
                 console.error('Error loading GLB model:', error);
             });
@@ -531,7 +543,35 @@ function GameCanvas() {
                 assetLoaded(); // Mark this asset as loaded
             }, undefined, function (error) {
                 console.error('Error loading GLB model:', error);
-            });
+            });*/
+
+            function createLOD(scene, sceneMin, distance) {
+                const lod = new THREE.LOD();
+                scene.matrixAutoUpdate = false;
+                sceneMin.matrixAutoUpdate = false;
+                scene.updateMatrix();
+                sceneMin.updateMatrix();
+                lod.addLevel(scene, 0);
+                lod.addLevel(sceneMin, distance); // Adjust the distance factor as needed
+                return lod;
+            }
+
+            function loadTreeModel(modelName, modelNameMin, modelRef, distance, callback) {
+                loader.load(`models/${modelName}.glb`, function (gltf) {
+                    loader.load(`models/${modelNameMin}-min.glb`, function (gltfMin) {
+                        const lod = createLOD(gltf.scene, gltfMin.scene, distance);
+                        modelRef.current.models[modelName] = lod;
+                        console.log(`${modelName} model loaded`);
+                        callback(); // Mark this asset as loaded
+                    });
+                }, undefined, function (error) {
+                    console.error('Error loading GLB model:', error);
+                });
+            }
+
+            loadTreeModel('tree-v2', 'tree-v2', treeRef, 400, assetLoaded);
+            loadTreeModel('tree-v3', 'tree-v3', treeRef, 400, assetLoaded);
+            loadTreeModel('tree-v4', 'tree-v4', treeRef, 400, assetLoaded);
 
             loader.load('models/trinkets-v1-min4.glb', function (gltf) {
                 decorsRef.current.models.modelv1 = gltf.scene;
@@ -771,7 +811,7 @@ function GameCanvas() {
         })
 
         onMessage('tree-coordinates', payload => {
-            console.log('received-trees: ', payload.trees);
+            console.log('received-trees: ', payload.trees.length);
 
             const newTreeIDs = new Set();
             // Process received trees and update or create new ones
@@ -782,11 +822,11 @@ function GameCanvas() {
                 if (!treeMesh) {
                     // Create new tree mesh
                     if(treeItem.type === 'v0') {
-                        treeMesh = treeRef.current.models.model.clone();
+                        treeMesh = treeRef.current.models['tree-v2'].clone();
                     } else if(treeItem.type === 'v1') {
-                        treeMesh = treeRef.current.models.modelv2.clone();
+                        treeMesh = treeRef.current.models['tree-v3'].clone();
                     } else if(treeItem.type === 'v2') {
-                        treeMesh = treeRef.current.models.modelv3.clone();
+                        treeMesh = treeRef.current.models['tree-v4'].clone();
                     }
 
                     // const y = getYPosition(treeItem.displayX, treeItem.displayY);
@@ -822,7 +862,7 @@ function GameCanvas() {
 
 
         onMessage('decorations-coordinates', payload => {
-            console.log('received-decorations: ', payload.decorations);
+            console.log('received-decorations: ', payload.decorations.length);
 
             const newDecorationIDs = new Set();
             // Process received trees and update or create new ones
@@ -841,12 +881,12 @@ function GameCanvas() {
                         decorMesh = decorsRef.current.models.modelv3.clone();
                         decorMesh.scale.set(3,3,3);
                     } else if(decorItem.type === 3) {
-                        decorMesh = decorsRef.current.models.modelv4.clone();
+                        decorMesh = decorsRef.current.models.modelv3.clone();
                     } else if(decorItem.type === 4) {
-                        decorMesh = decorsRef.current.models.modelv5.clone();
+                        decorMesh = decorsRef.current.models.modelv3.clone();
                         decorMesh.scale.set(2,2,2);
                     } else if(decorItem.type === 5) {
-                        decorMesh = decorsRef.current.models.modelv6.clone();
+                        decorMesh = decorsRef.current.models.modelv3.clone();
                         decorMesh.scale.set(2,2,2);
                     }
 
@@ -895,7 +935,9 @@ function GameCanvas() {
             } else if (isFPVRef.current) {
                 updateFirstPersonView();
             }
+
             renderer.render(scene, camera);
+            // console.log('RND: ', performance.now() - st);
         }
 
         preloadAssets();
@@ -1141,16 +1183,17 @@ function GameCanvas() {
     return (<div>
         <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
         {selectedBlob ? (<BlobDetails {...selectedBlobData} onFollow={onFollow} isFollowing={isFollow} onSetFPV={onSetFPV} isFPV={isFPV}/>) : null}
-        <div className={'box heading'}>
+        {/*<div className={'box heading'}>
             <p>Blobs Alive: {totalStats.totalBlobs}</p>
-            <p>Births/dies: {totalStats.born} / {totalStats.died}</p>
+            <p>Births/dies: {totalStats.additionalStats.blobBorn} / {totalStats.additionalStats.blobDied}</p>
             <p>Male: {totalStats.totalMale}</p>
             <p>Female: {totalStats.totalFemale}</p>
             <p>Average Age: {totalStats.averageAge}</p>
             <p>Food: {totalStats.totalFood}</p>
             <p>Eaten: {totalStats.foodEaten}</p>
             <p>Grown: {totalStats.foodGrown}</p>
-        </div>
+        </div>*/}
+        <BlobStats {...totalStats} />
         <div className={'minimap-holder'}>
             <MiniMap size={120} />
         </div>
